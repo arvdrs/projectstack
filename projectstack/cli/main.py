@@ -15,6 +15,8 @@ import click
 from projectstack.parser.har_parser import parse_har, summarize
 from projectstack.correlator.engine import run_correlation
 from projectstack.generator.jmx_generator import generate_jmx
+from projectstack.runner.jmeter_runner import run_jmeter, find_jmeter
+from projectstack.runner.metrics_parser import parse_jtl, print_summary
 
 
 @click.group()
@@ -136,5 +138,65 @@ def validate(jmx_file):
         raise SystemExit(1)
 
     click.echo(f"Valid jMeter JMX file.")
-    click.echo(f"  Samplers : {len(samplers)}")
+    click.echo(f"  Samplers   : {len(samplers)}")
     click.echo(f"  Extractors : {len(root.findall('.//JSR223PostProcessor'))}")
+
+
+@cli.command()
+@click.argument("jmx_file", type=click.Path(exists=True, readable=True))
+@click.option("--threads", "-t", default=None, type=int, help="Override virtual user count.")
+@click.option("--ramp-up", "-r", default=None, type=int, help="Override ramp-up period in seconds.")
+@click.option("--loops", "-l", default=None, type=int, help="Override loop iteration count.")
+@click.option("--output-dir", "-o", default=None, help="Directory for JTL results (default: temp dir).")
+@click.option("--timeout", default=3600, show_default=True, help="Max seconds to wait for test completion.")
+def run(jmx_file, threads, ramp_up, loops, output_dir, timeout):
+    """Run a JMX test plan with jMeter and display metrics."""
+    jmeter = find_jmeter()
+    if not jmeter:
+        click.echo(
+            "Error: jMeter not found.\n"
+            "Install it or set JMETER_BIN=/path/to/jmeter.",
+            err=True,
+        )
+        raise SystemExit(1)
+
+    click.echo(f"jMeter : {jmeter}")
+    click.echo(f"JMX    : {jmx_file}")
+    if threads:
+        click.echo(f"Threads: {threads}")
+    if ramp_up:
+        click.echo(f"Ramp-up: {ramp_up}s")
+    if loops:
+        click.echo(f"Loops  : {loops}")
+    click.echo("\nRunning test... (this may take a while)\n")
+
+    try:
+        result = run_jmeter(
+            jmx_path=jmx_file,
+            output_dir=output_dir,
+            threads=threads,
+            ramp_up=ramp_up,
+            loops=loops,
+            timeout=timeout,
+        )
+    except FileNotFoundError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(1)
+    except Exception as exc:
+        click.echo(f"jMeter failed: {exc}", err=True)
+        raise SystemExit(1)
+
+    if result["returncode"] != 0:
+        click.echo("jMeter exited with errors. Last log lines:", err=True)
+        for line in result["stderr"].splitlines()[-10:]:
+            click.echo(f"  {line}", err=True)
+        click.echo(f"\nFull log: {result['log_path']}", err=True)
+        raise SystemExit(1)
+
+    click.echo(f"Results : {result['jtl_path']}")
+
+    try:
+        summary = parse_jtl(result["jtl_path"])
+        print_summary(summary)
+    except (FileNotFoundError, ValueError) as exc:
+        click.echo(f"Warning: could not parse results — {exc}", err=True)
