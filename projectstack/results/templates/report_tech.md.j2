@@ -1,0 +1,183 @@
+# {{ run.scenario }} — load test report
+
+Run `{{ run.run_id }}`{% if run.tag %} · {{ run.tag }}{% endif %} · {{ run.start|day }} {{ run.start|clock }} to {{ run.end|clock }} · {{ run.duration_s|duration }} · {{ run.samples|num }} samples · peak {{ run.peak_users|num }} users
+
+**Verdict: {{ verdict.icon }} {{ verdict.label }}**{% if sla.defined %} — SLA: {{ sla.targets|join(" · ") }}{% endif %}
+
+
+{% for k, v, s in tiles %}
+- **{{ k }}:** {{ v }}{% if s %} ({{ s }}){% endif %}
+
+{% endfor %}
+{% if unverified %}
+
+> **Check these figures.** The AI-written text cites {{ unverified|length }} number(s) that could not be matched to findings.json: {% for u in unverified %}“{{ u.text }}” ({{ u.field }}){% if not loop.last %}, {% endif %}{% endfor %}
+
+{% endif %}
+
+## Summary
+
+{{ n.summary }}
+
+{% if sla.defined %}
+## SLA results
+
+| Check | Scope | Target | Measured | Result |
+|---|---|---:|---:|---|
+{% for c in sla.get("checks") or [] %}
+| {{ c.metric }} | {{ (c.label or "All requests")|md }} | {{ c.target|value }} {{ c.unit }} | {{ c.actual|value }} {{ c.unit }} | {{ "✓ Pass" if c.passed else "✕ Fail" }} |
+{% endfor %}
+
+Measured over the steady state, {{ steady.start_offset_s|offset }} to {{ steady.end_offset_s|offset }}.
+
+{% endif %}
+{% if baseline %}
+## Compared with the baseline
+
+{% if not baseline.found %}
+No baseline: {{ baseline.note }}.
+
+{% else %}
+Baseline run `{{ baseline.run_id }}`{% if baseline.tag %} ({{ baseline.tag }}){% endif %}. Load: {{ baseline.load.baseline_users|num }} → {{ baseline.load.current_users|num }} users, {{ baseline.load.baseline_tps|num(1) }} → {{ baseline.load.current_tps|num(1) }} {{ baseline.load.kind }}s per second — {% if baseline.load.comparable %}comparable.{% else %}**not comparable** ({{ baseline.load.reason }}), so differences are not counted as regressions.{% endif %}
+
+
+{{ baseline.summary.regressed }} regressed, {{ baseline.summary.improved }} improved, {{ baseline.summary.compared }} labels compared (regression: p95 +{{ baseline.thresholds.p95_pct|value }}% and +{{ baseline.thresholds.p95_ms|value }} ms, or errors +{{ baseline.thresholds.err_pp|value }} pt).
+
+{% for f in regressions %}
+{% if f.evidence.metric == "p95_ms" %}
+| Label | Kind | Baseline p95 | Now | Change |
+|---|---|---:|---:|---:|
+{% for r in f.evidence.labels %}
+| {{ r.label|md }} | {{ r.kind }} | {{ r.p95_before|num }} ms | {{ r.p95_after|num }} ms | +{{ r.increase_pct|value }}% |
+{% endfor %}
+{% else %}
+| Label | Kind | Baseline errors | Now | Change |
+|---|---|---:|---:|---:|
+{% for r in f.evidence.labels %}
+| {{ r.label|md }} | {{ r.kind }} | {{ r.err_before|pct }} | {{ r.err_after|pct }} | +{{ r.increase_pp|value }} pt |
+{% endfor %}
+{% endif %}
+
+{% endfor %}
+{% endif %}
+{% endif %}
+## Timeline
+
+{% for o in n.timeline %}
+- {{ o }}
+{% endfor %}
+
+<details><summary>Timeline as a table ({{ doc.timeline.bucket_s }} s buckets)</summary>
+
+| Time | UTC | Users | Requests/s | p95 (ms) | Errors | Samples |
+|---|---|---:|---:|---:|---:|---:|
+{% for p in timeline_rows %}
+| {{ p.start|offset }} | {{ p.clock }} | {{ p.users|num }} | {{ p.tps|num(1) }} | {{ p.p95|num }} | {{ p.err|pct }} | {{ p.samples|num }} |
+{% endfor %}
+
+</details>
+
+{% for t in tables %}
+## {{ t.title }}
+
+| Label | Samples | Avg | p50 | p90 | p95 | p99 | Max | Errors | Per s |{% if sla.defined %} SLA |{% endif %}
+
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|{% if sla.defined %}---|{% endif %}
+
+{% for r in t.rows %}
+| {{ r.label|md }} | {{ r.samples|num }} | {{ r.avg_ms|num }} | {{ r.p50_ms|num }} | {{ r.p90_ms|num }} | {{ r.p95_ms|num }} | {{ r.p99_ms|num }} | {{ r.max_ms|num }} | {{ r.error_pct|pct }} | {{ r.tps|num(2) }} |{% if sla.defined %} {% if r.label in failed_by_label %}✕ {{ failed_by_label[r.label]|join(", ") }}{% elif t.kind == "transaction" or not doc.labels.get("transaction") %}✓{% else %}—{% endif %} |{% endif %}
+
+{% endfor %}
+{% if t.overall %}
+| **All {{ t.title|lower }}** | {{ t.overall.samples|num }} | {{ t.overall.avg_ms|num }} | {{ t.overall.p50_ms|num }} | {{ t.overall.p90_ms|num }} | {{ t.overall.p95_ms|num }} | {{ t.overall.p99_ms|num }} | {{ t.overall.max_ms|num }} | {{ t.overall.error_pct|pct }} | {{ t.overall.tps|num(2) }} |{% if sla.defined %} |{% endif %}
+
+{% endif %}
+
+Times in ms over the steady state; percentiles are exact.{% if t.truncated %} Showing {{ t.truncated.shown }} of {{ t.truncated.total }} labels: {{ t.truncated.kept }}.{% endif %}
+
+
+{% endfor %}
+## Findings
+
+{% for f in findings %}
+### #{{ f.n }} {{ f.sev_icon }} {{ f.sev_label }}: {{ f.title }}
+
+{% if f.start_offset_s is defined %}{% if f.end_offset_s is defined %}{{ f.start_offset_s|offset }} to {{ f.end_offset_s|offset }}{% else %}from {{ f.start_offset_s|offset }}{% endif %}{% endif %}{% if f.labels %} · {{ f.labels|join(", ") }}{% endif %}
+
+
+{{ f.detail }}
+
+{% if f.explanation %}
+**What it means:** {{ f.explanation }}
+
+{% endif %}{% if f.mapping %}
+Set by:
+{% for line in f.mapping %}
+- {{ line }}
+{% endfor %}
+
+{% endif %}
+Evidence: {% for k, v in f.evidence_rows %}{{ k }} {{ v|value }}{% if not loop.last %} · {% endif %}{% endfor %}
+
+{% for tb in f.evidence_tables %}
+
+| {{ tb.cols|join(" | ") }} |
+|{% for c in tb.cols %}---|{% endfor %}
+
+{% for row in tb.rows %}
+| {% for v in row %}{{ v|value|md }} | {% endfor %}
+
+{% endfor %}
+{% endfor %}
+
+{% else %}
+No findings. The detectors that ran found no SLA breach, change point, error burst, saturation or load-generator problem.
+
+{% endfor %}
+{% if skipped %}
+Not checked: {% for s in skipped %}{{ s.detector }} ({{ s.reason }}){% if not loop.last %}; {% endif %}{% endfor %}.
+
+{% endif %}
+{% if n.root_causes %}
+## Likely root causes
+
+{% for c in n.root_causes %}
+{{ loop.index }}. **{{ c.cause }}** ({{ c.confidence }} confidence{% if c.findings %}; findings {% for i in c.findings %}#{{ i }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %})
+   {{ c.reasoning }}{% if c.how_to_confirm %} To confirm: {{ c.how_to_confirm }}{% endif %}
+
+{% endfor %}
+
+{% endif %}
+{% if n.next_tests %}
+## Recommended next tests
+
+{% for t in n.next_tests %}
+{{ loop.index }}. **{{ t.test }}**{% if t.why %} — {{ t.why }}{% endif %}
+
+{% endfor %}
+
+{% endif %}
+{% if errors %}
+## Top errors
+
+| Label | Code | Message | Count | First | Last |
+|---|---|---|---:|---|---|
+{% for e in errors %}
+| {{ e.label|md }} | {{ e.response_code|md }} | {{ (e.failure or e.response_message)|md }} | {{ e.count|num }} | {{ e.first_offset_s|offset }} | {{ e.last_offset_s|offset }} |
+{% endfor %}
+
+Whole run, including ramp-up and ramp-down.
+
+{% endif %}
+---
+
+- Steady state: {{ steady.get("note") or (steady.start_offset_s|offset ~ " to " ~ steady.end_offset_s|offset) }}.
+{% for note in notes %}
+- {{ note }}
+{% endfor %}
+{% if truncated %}
+- findings.json was reduced to fit its size budget: {{ truncated.keys()|join(", ") }}.
+{% endif %}
+- Narrative: {% if narrative.source == "llm" %}written by {{ narrative.provider }} with prompt {{ narrative.prompt }}; {{ number_check }}.{% else %}rule-based (no AI){% if narrative.note %} — {{ narrative.note }}{% endif %}.{% endif %} Findings, verdict and figures come from deterministic detectors.
+- Raw samples stayed in the results database; {% if narrative.source == "llm" %}the AI model received only findings.json ({{ doc.size_bytes|kib }}){% else %}nothing was sent to an AI service{% endif %}.
+- Generated by ProjectStack · {{ generated_at }} · {{ doc.schema }}

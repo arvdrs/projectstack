@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{% endblock %}</title>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,0.10); --wash: rgba(11,11,11,0.035);
+  --series: #2a78d6; --band: rgba(11,11,11,0.055);
+  --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10); --wash: rgba(255,255,255,0.04);
+    --series: #3987e5; --band: rgba(255,255,255,0.07);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10); --wash: rgba(255,255,255,0.04);
+  --series: #3987e5; --band: rgba(255,255,255,0.07);
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink);
+  font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 1000px; margin: 0 auto; padding: 32px 16px 48px; }
+h1 { font-size: 26px; line-height: 1.25; margin: 4px 0 6px; }
+h2 { font-size: 18px; margin: 0 0 12px; }
+h3 { font-size: 15px; margin: 0; }
+p { margin: 0 0 10px; }
+code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+a { color: var(--series); }
+.eyebrow { color: var(--ink-2); font-size: 13px; font-weight: 600; letter-spacing: .02em; margin: 0; }
+.meta { color: var(--ink-2); font-size: 13px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px; margin: 16px 0; }
+.badge { display: inline-flex; align-items: center; gap: 7px; font-weight: 600; font-size: 14px; white-space: nowrap; }
+.badge-icon { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%;
+  font-size: 12px; font-weight: 700; color: #fff; background: var(--muted); }
+.badge.critical .badge-icon { background: var(--critical); }
+.badge.warning .badge-icon { background: var(--warning); color: #0b0b0b; }
+.badge.good .badge-icon { background: var(--good); }
+.badge.big { font-size: 18px; }
+.badge.big .badge-icon { width: 26px; height: 26px; font-size: 15px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin: 16px 0; }
+.tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+.tile .k { color: var(--ink-2); font-size: 13px; }
+.tile .v { font-size: 24px; font-weight: 650; margin-top: 2px; }
+.tile .s { color: var(--muted); font-size: 12px; }
+.callout { border: 1px solid var(--border); border-left: 4px solid var(--warning); background: var(--surface);
+  border-radius: 8px; padding: 12px 14px; margin: 16px 0; font-size: 14px; }
+.callout ul { margin: 6px 0 0; padding-left: 20px; }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { padding: 7px 10px; border-bottom: 1px solid var(--grid); text-align: left; vertical-align: top; }
+th { color: var(--ink-2); font-weight: 600; font-size: 12.5px; white-space: nowrap; }
+td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+tr.total td { font-weight: 600; border-top: 1px solid var(--axis); }
+.status-fail { font-weight: 600; }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+ul.plain, ol.plain { padding-left: 20px; margin: 0; }
+ul.plain li, ol.plain li { margin: 6px 0; }
+details { margin-top: 12px; }
+summary { cursor: pointer; color: var(--ink-2); font-size: 13.5px; }
+footer { color: var(--muted); font-size: 12.5px; margin-top: 28px; }
+footer p { margin: 4px 0; }
+{% block style %}{% endblock %}
+@media print {
+  body { background: #fff; } .card, .tile { break-inside: avoid; }
+  .tl-tip { display: none; }
+}
+</style>
+</head>
+<body>
+<main>
+{% block body %}{% endblock %}
+</main>
+{% block script %}{% endblock %}
+</body>
+</html>

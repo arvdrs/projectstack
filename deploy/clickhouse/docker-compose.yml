@@ -1,0 +1,23 @@
+# Local ClickHouse for ProjectStack results analysis (development, tests, standalone use).
+# Start:  docker compose -f deploy/clickhouse/docker-compose.yml up -d
+# Later, point ProjectStack at the team server instead (see README → Results analysis).
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.8
+    container_name: projectstack-clickhouse
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: projectstack
+      CLICKHOUSE_USER: projectstack
+      CLICKHOUSE_PASSWORD: projectstack          # local development only
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ports:
+      - "127.0.0.1:8123:8123"                    # HTTP interface (used by ProjectStack)
+      - "127.0.0.1:9000:9000"                    # native protocol (clickhouse-client)
+    volumes:
+      - projectstack-clickhouse-data:/var/lib/clickhouse
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+
+volumes:
+  projectstack-clickhouse-data:
