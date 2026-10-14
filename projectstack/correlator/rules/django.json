@@ -1,0 +1,15 @@
+{
+  "name": "Django",
+  "description": "csrfmiddlewaretoken form field.",
+  "rules": [
+    {
+      "id": "django-csrf",
+      "name": "csrfmiddlewaretoken",
+      "type": "css",
+      "selector": "input[name=csrfmiddlewaretoken]",
+      "attr": "value",
+      "var": "C_CSRF_MIDDLEWARE_TOKEN"
+    }
+  ],
+  "id": "django"
+}

@@ -117,7 +117,7 @@ def test_extractor_generated_for_correlated_value(tmp_path):
     cv = _corr("VAR_token", 0, "body", "access_token", "tok_abc123xyz", [1])
     generate_jmx([_req(), _req()], [cv], output_path=out)
     root = _parse_jmx(out)
-    extractors = root.findall(".//JSR223PostProcessor")
+    extractors = root.findall(".//JSONPostProcessor")
     assert len(extractors) == 1
     assert extractors[0].attrib["testname"] == "Extract VAR_token"
 
@@ -143,14 +143,14 @@ def test_variable_substitution_in_header(tmp_path):
     assert auth_header == "Bearer ${VAR_token}"
 
 
-def test_groovy_script_contains_var_name(tmp_path):
+def test_json_extractor_uses_var_name_and_path(tmp_path):
     out = tmp_path / "out.jmx"
     cv = _corr("VAR_access_token", 0, "body", "access_token", "tok_abc123xyz", [1])
     generate_jmx([_req(), _req()], [cv], output_path=out)
     root = _parse_jmx(out)
-    script = root.find(".//JSR223PostProcessor//stringProp[@name='script']").text
-    assert "VAR_access_token" in script
-    assert "access_token" in script
+    jp = root.find(".//JSONPostProcessor")
+    assert jp.find("stringProp[@name='JSONPostProcessor.referenceNames']").text == "VAR_access_token"
+    assert jp.find("stringProp[@name='JSONPostProcessor.jsonPathExprs']").text == "$.access_token"
 
 
 def test_no_timers_in_output(tmp_path):

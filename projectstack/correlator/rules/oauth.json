@@ -1,0 +1,52 @@
+{
+  "name": "OAuth 2.0 / OpenID Connect",
+  "description": "Authorization codes, state and tokens across redirects and token responses.",
+  "rules": [
+    {
+      "id": "oauth-code",
+      "name": "Authorization code (redirect)",
+      "type": "regex",
+      "regex": "[?&#]code=([^&#\\s]+)",
+      "where": "headers",
+      "var": "C_OAUTH_CODE"
+    },
+    {
+      "id": "oauth-state",
+      "name": "state (redirect)",
+      "type": "regex",
+      "regex": "[?&#]state=([^&#\\s]+)",
+      "where": "headers",
+      "var": "C_OAUTH_STATE"
+    },
+    {
+      "id": "oidc-session-state",
+      "name": "session_state (redirect)",
+      "type": "regex",
+      "regex": "[?&#]session_state=([^&#\\s]+)",
+      "where": "headers",
+      "var": "C_SESSION_STATE"
+    },
+    {
+      "id": "oauth-access-token",
+      "name": "access_token",
+      "type": "json",
+      "path": "$.access_token",
+      "var": "C_ACCESS_TOKEN"
+    },
+    {
+      "id": "oauth-refresh-token",
+      "name": "refresh_token",
+      "type": "json",
+      "path": "$.refresh_token",
+      "var": "C_REFRESH_TOKEN"
+    },
+    {
+      "id": "oidc-id-token",
+      "name": "id_token",
+      "type": "json",
+      "path": "$.id_token",
+      "var": "C_ID_TOKEN"
+    }
+  ],
+  "id": "oauth"
+}

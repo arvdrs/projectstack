@@ -1,0 +1,31 @@
+{
+  "name": "SAML 2.0",
+  "description": "SAMLRequest / SAMLResponse / RelayState auto-post form fields.",
+  "rules": [
+    {
+      "id": "saml-response",
+      "name": "SAMLResponse",
+      "type": "css",
+      "selector": "input[name=SAMLResponse]",
+      "attr": "value",
+      "var": "C_SAML_RESPONSE"
+    },
+    {
+      "id": "saml-request",
+      "name": "SAMLRequest",
+      "type": "css",
+      "selector": "input[name=SAMLRequest]",
+      "attr": "value",
+      "var": "C_SAML_REQUEST"
+    },
+    {
+      "id": "saml-relaystate",
+      "name": "RelayState",
+      "type": "css",
+      "selector": "input[name=RelayState]",
+      "attr": "value",
+      "var": "C_RELAY_STATE"
+    }
+  ],
+  "id": "saml"
+}

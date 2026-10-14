@@ -1,0 +1,11 @@
+{
+  "include": ["projectstack"],
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonVersion": "3.10",
+  "pythonPlatform": "Linux",
+  "typeCheckingMode": "basic",
+  "extraPaths": ["."],
+  "reportMissingImports": false,
+  "reportMissingModuleSource": false
+}

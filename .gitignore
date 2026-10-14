@@ -8,3 +8,22 @@ build/
 .pytest_cache/
 *.jmx
 *.har
+
+# Web app
+node_modules/
+projectstack/ui-web/dist/
+
+# Local tools and editor settings
+.claude/
+.vscode/
+
+# Test runs, logs and local data
+*.log
+*.jtl
+/results/
+.env
+.env.*
+
+# Personal files and recordings from real systems
+Screenshot*.png
+sample_postman.json

@@ -1,0 +1,31 @@
+{
+  "name": "JSF / Jakarta Faces / Oracle ADF",
+  "description": "Faces ViewState and ADF loop counters.",
+  "rules": [
+    {
+      "id": "jsf-viewstate",
+      "name": "javax.faces.ViewState",
+      "type": "css",
+      "selector": "input[name=javax.faces.ViewState]",
+      "attr": "value",
+      "var": "C_FACES_VIEWSTATE"
+    },
+    {
+      "id": "jakarta-viewstate",
+      "name": "jakarta.faces.ViewState",
+      "type": "css",
+      "selector": "input[name=jakarta.faces.ViewState]",
+      "attr": "value",
+      "var": "C_FACES_VIEWSTATE"
+    },
+    {
+      "id": "adf-afrloop",
+      "name": "_afrLoop",
+      "type": "regex",
+      "regex": "_afrLoop=(\\d+)",
+      "where": "body",
+      "var": "C_AFR_LOOP"
+    }
+  ],
+  "id": "jsf"
+}

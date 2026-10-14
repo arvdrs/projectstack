@@ -102,10 +102,12 @@ def test_pass3_skips_content_type():
     assert len(found) == 0
 
 
-def test_pass3_extracts_cookie():
-    reqs = [_req(cookies=[{"name": "session_id", "value": "sess_abc123xyz789"}])]
+def test_pass3_leaves_cookies_to_cookie_manager():
+    # Cookie state is handled by JMeter's HTTP Cookie Manager, not by extractors
+    reqs = [_req(cookies=[{"name": "session_id", "value": "sess_abc123xyz789"}],
+                 res_headers={"Set-Cookie": "session_id=sess_abc123xyz789; Path=/"})]
     found = _pass3_headers_cookies(reqs)
-    assert any(cv.extract_from == "cookie" for cv in found)
+    assert not any(cv.extract_from == "cookie" for cv in found)
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +153,7 @@ def test_full_pipeline_login_flow():
             headers={"Authorization": f"Bearer {token}"},
         ),
     ]
-    result = run_correlation(reqs, use_ollama=False)
+    result = run_correlation(reqs, use_ai=False)
     var_names = [cv.var_name for cv in result]
     assert len(result) > 0
     assert any("token" in n.lower() or "jwt" in n.lower() for n in var_names)

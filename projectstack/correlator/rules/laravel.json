@@ -1,0 +1,23 @@
+{
+  "name": "Laravel",
+  "description": "_token form field and csrf-token meta tag.",
+  "rules": [
+    {
+      "id": "laravel-token",
+      "name": "_token hidden input",
+      "type": "css",
+      "selector": "input[name=_token]",
+      "attr": "value",
+      "var": "C_LARAVEL_TOKEN"
+    },
+    {
+      "id": "laravel-csrf-meta",
+      "name": "csrf-token meta tag",
+      "type": "css",
+      "selector": "meta[name=csrf-token]",
+      "attr": "content",
+      "var": "C_CSRF_TOKEN"
+    }
+  ],
+  "id": "laravel"
+}

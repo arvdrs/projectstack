@@ -1,0 +1,31 @@
+{
+  "name": "Spring Security",
+  "description": "CSRF token in forms, meta tags and response headers.",
+  "rules": [
+    {
+      "id": "spring-csrf-input",
+      "name": "_csrf hidden input",
+      "type": "css",
+      "selector": "input[name=_csrf]",
+      "attr": "value",
+      "var": "C_CSRF"
+    },
+    {
+      "id": "spring-csrf-meta",
+      "name": "_csrf meta tag",
+      "type": "css",
+      "selector": "meta[name=_csrf]",
+      "attr": "content",
+      "var": "C_CSRF"
+    },
+    {
+      "id": "spring-csrf-header",
+      "name": "X-CSRF-TOKEN response header",
+      "type": "regex",
+      "regex": "(?i)X-CSRF-TOKEN:\\s*([^\\s]+)",
+      "where": "headers",
+      "var": "C_CSRF"
+    }
+  ],
+  "id": "spring"
+}

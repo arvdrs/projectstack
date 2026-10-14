@@ -1,0 +1,47 @@
+{
+  "name": "ASP.NET WebForms / MVC",
+  "description": "ViewState, event validation and anti-forgery tokens.",
+  "rules": [
+    {
+      "id": "aspnet-viewstate",
+      "name": "__VIEWSTATE",
+      "type": "css",
+      "selector": "input[name=__VIEWSTATE]",
+      "attr": "value",
+      "var": "C_VIEWSTATE"
+    },
+    {
+      "id": "aspnet-viewstategen",
+      "name": "__VIEWSTATEGENERATOR",
+      "type": "css",
+      "selector": "input[name=__VIEWSTATEGENERATOR]",
+      "attr": "value",
+      "var": "C_VIEWSTATEGENERATOR"
+    },
+    {
+      "id": "aspnet-eventvalidation",
+      "name": "__EVENTVALIDATION",
+      "type": "css",
+      "selector": "input[name=__EVENTVALIDATION]",
+      "attr": "value",
+      "var": "C_EVENTVALIDATION"
+    },
+    {
+      "id": "aspnet-previouspage",
+      "name": "__PREVIOUSPAGE",
+      "type": "css",
+      "selector": "input[name=__PREVIOUSPAGE]",
+      "attr": "value",
+      "var": "C_PREVIOUSPAGE"
+    },
+    {
+      "id": "aspnet-antiforgery",
+      "name": "__RequestVerificationToken",
+      "type": "css",
+      "selector": "input[name=__RequestVerificationToken]",
+      "attr": "value",
+      "var": "C_REQUEST_VERIFICATION_TOKEN"
+    }
+  ],
+  "id": "aspnet"
+}

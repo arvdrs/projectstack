@@ -42,6 +42,10 @@ class SamplerMetrics:
     def p95_ms(self) -> int:
         return _percentile(self.times, 95)
 
+    @property
+    def p99_ms(self) -> int:
+        return _percentile(self.times, 99)
+
 
 @dataclass
 class MetricsSummary:

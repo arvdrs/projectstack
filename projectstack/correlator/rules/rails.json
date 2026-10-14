@@ -1,0 +1,23 @@
+{
+  "name": "Ruby on Rails",
+  "description": "authenticity_token form field and csrf-token meta tag.",
+  "rules": [
+    {
+      "id": "rails-authenticity",
+      "name": "authenticity_token",
+      "type": "css",
+      "selector": "input[name=authenticity_token]",
+      "attr": "value",
+      "var": "C_AUTHENTICITY_TOKEN"
+    },
+    {
+      "id": "rails-csrf-meta",
+      "name": "csrf-token meta tag",
+      "type": "css",
+      "selector": "meta[name=csrf-token]",
+      "attr": "content",
+      "var": "C_CSRF_TOKEN"
+    }
+  ],
+  "id": "rails"
+}

@@ -1,0 +1,31 @@
+{
+  "name": "Keycloak",
+  "description": "Login form action parameters (session_code, execution, tab_id).",
+  "rules": [
+    {
+      "id": "kc-session-code",
+      "name": "session_code",
+      "type": "regex",
+      "regex": "session_code=([^&\\\"'\\s]+)",
+      "where": "body",
+      "var": "C_KC_SESSION_CODE"
+    },
+    {
+      "id": "kc-execution",
+      "name": "execution",
+      "type": "regex",
+      "regex": "execution=([^&\\\"'\\s]+)",
+      "where": "body",
+      "var": "C_KC_EXECUTION"
+    },
+    {
+      "id": "kc-tab-id",
+      "name": "tab_id",
+      "type": "regex",
+      "regex": "tab_id=([^&\\\"'\\s]+)",
+      "where": "body",
+      "var": "C_KC_TAB_ID"
+    }
+  ],
+  "id": "keycloak"
+}

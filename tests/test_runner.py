@@ -137,3 +137,22 @@ def test_parse_jtl_empty_file(tmp_path):
     jtl.write_text("timeStamp,elapsed,label,responseCode,success\n")
     with pytest.raises(ValueError, match="no data rows"):
         parse_jtl(jtl)
+
+
+def test_override_sets_scheduler_duration_and_infinite_loops(tmp_path):
+    from projectstack.generator.jmx_generator import generate_jmx
+    from projectstack.parser.har_parser import HarRequest
+    from projectstack.runner.jmeter_runner import _override_thread_settings, read_thread_settings
+
+    req = HarRequest(method="GET", url="https://x.test/a", headers={}, query_params=[], body=None,
+                     body_mime_type=None, status_code=200, response_headers={}, response_body=None,
+                     response_mime_type=None, cookies=[])
+    jmx = tmp_path / "t.jmx"
+    generate_jmx([req], [], output_path=jmx, threads=1, loops=1)
+    assert read_thread_settings(str(jmx)) == {"threads": 1, "rampup": 1, "loops": 1, "duration_seconds": 0}
+
+    out = _override_thread_settings(str(jmx), threads=25, ramp_up=10, loops=-1, duration_seconds=300)
+    assert read_thread_settings(out) == {"threads": 25, "rampup": 10, "loops": -1, "duration_seconds": 300}
+
+    back = _override_thread_settings(out, threads=None, ramp_up=None, loops=5, duration_seconds=0)
+    assert read_thread_settings(back) == {"threads": 25, "rampup": 10, "loops": 5, "duration_seconds": 0}
