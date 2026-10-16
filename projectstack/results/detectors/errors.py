@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from projectstack.results.detectors import Context, Finding
+from projectstack.results.metrics import in_kind
 
 
 def detect_bursts(ctx: Context) -> tuple[list[Finding], str | None]:
@@ -59,10 +60,10 @@ def _causes(ctx: Context, start_ms: int, end_ms: int) -> list[dict]:
         f"""SELECT response_code, if(failure_message != '', substring(failure_message, 1, 120), response_message) AS msg,
                    count() AS n
             FROM {db.db}.samples
-            WHERE run_id = {{run:String}} AND NOT success AND has({{req:Array(String)}}, label)
+            WHERE run_id = {{run:String}} AND NOT success AND {in_kind(db, "request")}
               AND ts >= fromUnixTimestamp64Milli({{s:Int64}}) AND ts < fromUnixTimestamp64Milli({{e:Int64}})
             GROUP BY response_code, msg ORDER BY n DESC LIMIT 3""",
-        {"run": ctx.run_id, "req": ctx.requests, "s": start_ms, "e": end_ms},
+        {"run": ctx.run_id, "s": start_ms, "e": end_ms},
     )
     return [{"code": r[0], "message": " ".join(r[1].split()), "count": int(r[2])} for r in rows]
 
@@ -72,9 +73,9 @@ def _labels(ctx: Context, start_ms: int, end_ms: int) -> list[dict]:
     rows = db.rows(
         f"""SELECT label, countIf(NOT success) AS e, count() AS n
             FROM {db.db}.samples
-            WHERE run_id = {{run:String}} AND has({{req:Array(String)}}, label)
+            WHERE run_id = {{run:String}} AND {in_kind(db, "request")}
               AND ts >= fromUnixTimestamp64Milli({{s:Int64}}) AND ts < fromUnixTimestamp64Milli({{e:Int64}})
             GROUP BY label HAVING e > 0 ORDER BY e DESC LIMIT 5""",
-        {"run": ctx.run_id, "req": ctx.requests, "s": start_ms, "e": end_ms},
+        {"run": ctx.run_id, "s": start_ms, "e": end_ms},
     )
     return [{"label": r[0], "errors": int(r[1]), "error_pct": round(r[1] / r[2] * 100, 2)} for r in rows]

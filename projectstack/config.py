@@ -45,6 +45,18 @@ DEFAULT_SETTINGS: dict[str, str] = {
     # Optional SELECT-only user for `pstack ask` (profile readonly = 2); empty: the user above, read-only per query
     "clickhouse_ask_user": "",
     "clickhouse_ask_password": "",
+    # Server metrics from the cloud (read-only). Empty keys: the machine's own sign-in is used —
+    # an AWS CLI profile / SSO session / instance role, or `az login` / managed identity.
+    "aws_profile": "",
+    "aws_region": "",
+    "aws_access_key_id": "",
+    "aws_secret_access_key": "",
+    "aws_session_token": "",
+    "azure_subscription_id": "",
+    "azure_tenant_id": "",
+    "azure_client_id": "",
+    "azure_client_secret": "",
+    "cloud_auto_fetch": "true",          # fetch a scenario's saved resources when a run is analysed
     # AI provider per task, JSON: {"report": "claude", "ask": "gemini", "correlation": "ollama/mistral"}.
     # Empty: correlation follows ai_provider; report and ask use Claude when an Anthropic key is set, else Gemini.
     "llm_tasks": "",
@@ -55,6 +67,7 @@ DEFAULT_SETTINGS: dict[str, str] = {
 SECRET_FIELDS = (
     "anthropic_api_key", "openai_api_key", "groq_api_key", "gemini_api_key", "gmail_app_password",
     "clickhouse_password", "clickhouse_ask_password",
+    "aws_secret_access_key", "aws_session_token", "azure_client_secret",
 )
 
 _ENV_OVERRIDES = {

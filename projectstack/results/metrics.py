@@ -60,19 +60,29 @@ _STAT_COLS = (
 )
 
 
+def in_kind(db: ResultsDB, *kinds: str) -> str:
+    """SQL condition: the sample's label is of these kinds in the run.
+
+    The kinds come from run_labels (written once at ingest) instead of being sent as a list:
+    a test with thousands of labels would exceed ClickHouse's limit on a query parameter's size.
+    """
+    names = ", ".join(f"'{k}'" for k in kinds)
+    return (f"label IN (SELECT label FROM {db.db}.run_labels FINAL "
+            f"WHERE run_id = {{run:String}} AND kind IN ({names}))")
+
+
 def compute(db: ResultsDB, run_id: str, window: Window, kinds: dict[str, str],
             bounds: dict[str, Any], users_from_threads: bool, bucket_s: int | None = None) -> dict[str, Any]:
     """Per-label stats and overall stats in the window, the timeline and top errors over the full run."""
-    requests = sorted(l for l, k in kinds.items() if k == "request")
-    transactions = sorted(l for l, k in kinds.items() if k == "transaction")
-    p = {"run": run_id, "ws": window.start_ms, "we": window.end_ms, "req": requests, "tx": transactions}
+    present = set(kinds.values())
+    p = {"run": run_id, "ws": window.start_ms, "we": window.end_ms}
     in_window = ("run_id = {run:String} AND ts >= fromUnixTimestamp64Milli({ws:Int64}) "
                  "AND ts < fromUnixTimestamp64Milli({we:Int64})")
 
     labels = db.dicts(
         f"""SELECT label, {_STAT_COLS}, toUnixTimestamp64Milli(min(ts)) AS first_ms
             FROM {db.db}.samples
-            WHERE {in_window} AND (has({{req:Array(String)}}, label) OR has({{tx:Array(String)}}, label))
+            WHERE {in_window} AND {in_kind(db, "request", "transaction")}
             GROUP BY label ORDER BY first_ms""",
         p,
     )
@@ -81,24 +91,22 @@ def compute(db: ResultsDB, run_id: str, window: Window, kinds: dict[str, str],
         per_label[kinds[row["label"]]].append({"label": row["label"], **_stats(row, window.duration_s)})
 
     overall = {}
-    for kind, arr in (("request", "req"), ("transaction", "tx")):
-        if not p[arr]:
+    for kind in ("request", "transaction"):
+        if kind not in present:
             continue
-        row = db.dicts(
-            f"SELECT {_STAT_COLS} FROM {db.db}.samples WHERE {in_window} AND has({{{arr}:Array(String)}}, label)", p,
-        )[0]
+        row = db.dicts(f"SELECT {_STAT_COLS} FROM {db.db}.samples WHERE {in_window} AND {in_kind(db, kind)}", p)[0]
         overall[kind] = _stats(row, window.duration_s)
 
     return {
         "window": window.as_dict(),
         "overall": overall,
         "labels": per_label,
-        "timeline": timeline(db, run_id, requests, bounds, users_from_threads, bucket_s),
-        "errors": top_errors(db, run_id, requests),
+        "timeline": timeline(db, run_id, bounds, users_from_threads, bucket_s),
+        "errors": top_errors(db, run_id),
     }
 
 
-def timeline(db: ResultsDB, run_id: str, requests: list[str], bounds: dict[str, Any],
+def timeline(db: ResultsDB, run_id: str, bounds: dict[str, Any],
              users_from_threads: bool, bucket_s: int | None = None) -> dict[str, Any]:
     """Per-bucket users, throughput, p95 and errors over the full run (requests only)."""
     run_s = (bounds["end_ms"] - bounds["start_ms"]) / 1000
@@ -107,9 +115,9 @@ def timeline(db: ResultsDB, run_id: str, requests: list[str], bounds: dict[str, 
         f"""SELECT toUnixTimestamp(toStartOfInterval(ts, toIntervalSecond({{b:UInt32}}))) * 1000 AS t,
                    count(), countIf(NOT success), quantileExact(0.95)(elapsed), avg(elapsed), avg(connect),
                    max(all_threads), uniqExact(thread_name)
-            FROM {db.db}.samples WHERE run_id = {{run:String}} AND has({{req:Array(String)}}, label)
+            FROM {db.db}.samples WHERE run_id = {{run:String}} AND {in_kind(db, "request")}
             GROUP BY t ORDER BY t""",
-        {"run": run_id, "req": requests, "b": bucket},
+        {"run": run_id, "b": bucket},
     )
     points = []
     for t, n, errors, p95, avg_ms, connect, all_threads, threads in rows:
@@ -130,16 +138,16 @@ def timeline(db: ResultsDB, run_id: str, requests: list[str], bounds: dict[str, 
             "points": points}
 
 
-def top_errors(db: ResultsDB, run_id: str, requests: list[str]) -> list[dict[str, Any]]:
+def top_errors(db: ResultsDB, run_id: str) -> list[dict[str, Any]]:
     """Most frequent failures over the full run, by label, response code and message."""
     rows = db.dicts(
         f"""SELECT label, response_code, response_message, substring(failure_message, 1, 200) AS failure,
                    count() AS count, toUnixTimestamp64Milli(min(ts)) AS first_ms,
                    toUnixTimestamp64Milli(max(ts)) AS last_ms
             FROM {db.db}.samples
-            WHERE run_id = {{run:String}} AND NOT success AND has({{req:Array(String)}}, label)
+            WHERE run_id = {{run:String}} AND NOT success AND {in_kind(db, "request")}
             GROUP BY label, response_code, response_message, failure ORDER BY count DESC LIMIT {TOP_ERRORS}""",
-        {"run": run_id, "req": requests},
+        {"run": run_id},
     )
     return [{**r, "count": int(r["count"]), "first_ms": int(r["first_ms"]), "last_ms": int(r["last_ms"])}
             for r in rows]

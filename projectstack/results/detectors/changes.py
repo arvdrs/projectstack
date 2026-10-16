@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from projectstack.results.detectors import Context, Finding
 from projectstack.results.detectors.changepoint import change_points, segment_levels
+from projectstack.results.metrics import in_kind
 
 MIN_BUCKETS = 8
 
@@ -104,11 +105,11 @@ def _labels_changed(ctx: Context, start_ms: int, change_ms: int, end_ms: int, wh
                        quantileExactIf(0.95)(elapsed, ts >= c) AS after,
                        countIf(ts < c) AS nb, countIf(ts >= c) AS na
                 FROM {db.db}.samples
-                WHERE run_id = {{run:String}} AND has({{req:Array(String)}}, label)
+                WHERE run_id = {{run:String}} AND {in_kind(db, "request")}
                   AND ts >= fromUnixTimestamp64Milli({{s:Int64}}) AND ts < fromUnixTimestamp64Milli({{e:Int64}})
                 GROUP BY label HAVING nb >= 10 AND na >= 10 AND after > before
                 ORDER BY after / greatest(before, 1) DESC LIMIT 5""",
-            {"run": ctx.run_id, "req": ctx.requests, "s": start_ms, "c": change_ms, "e": end_ms},
+            {"run": ctx.run_id, "s": start_ms, "c": change_ms, "e": end_ms},
         )
         return [{"label": r[0], "p95_before": int(r[1]), "p95_after": int(r[2])} for r in rows]
     rows = db.rows(
@@ -116,9 +117,9 @@ def _labels_changed(ctx: Context, start_ms: int, change_ms: int, end_ms: int, wh
             SELECT label, countIf(NOT success AND ts < c) / greatest(countIf(ts < c), 1) * 100 AS before,
                    countIf(NOT success AND ts >= c) / greatest(countIf(ts >= c), 1) * 100 AS after
             FROM {db.db}.samples
-            WHERE run_id = {{run:String}} AND has({{req:Array(String)}}, label)
+            WHERE run_id = {{run:String}} AND {in_kind(db, "request")}
               AND ts >= fromUnixTimestamp64Milli({{s:Int64}}) AND ts < fromUnixTimestamp64Milli({{e:Int64}})
             GROUP BY label HAVING after > before ORDER BY after - before DESC LIMIT 5""",
-        {"run": ctx.run_id, "req": ctx.requests, "s": start_ms, "c": change_ms, "e": end_ms},
+        {"run": ctx.run_id, "s": start_ms, "c": change_ms, "e": end_ms},
     )
     return [{"label": r[0], "error_pct_before": round(r[1], 2), "error_pct_after": round(r[2], 2)} for r in rows]

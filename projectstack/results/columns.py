@@ -11,10 +11,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
+# Numbers are read as signed and clamped into range: JMeter writes negative values in some
+# cases (an incomplete Transaction Controller gets elapsed = -startTime). Rows with a negative
+# elapsed time are skipped altogether by the loader; other negatives become 0.
+_U32 = "toUInt32(least(greatest({c}, 0), 4294967295))"
+_U64 = "toUInt64(greatest({c}, 0))"
+
 # JTL header name -> (input type for ClickHouse's input(), SELECT expression, samples column)
 KNOWN_COLUMNS: dict[str, tuple[str, str, str]] = {
     "timeStamp":       ("Int64",  "fromUnixTimestamp64Milli({c})", "ts"),
-    "elapsed":         ("UInt32", "{c}", "elapsed"),
+    "elapsed":         ("Int64",  _U32, "elapsed"),
     "label":           ("String", "{c}", "label"),
     "responseCode":    ("String", "{c}", "response_code"),
     "responseMessage": ("String", "{c}", "response_message"),
@@ -22,14 +28,14 @@ KNOWN_COLUMNS: dict[str, tuple[str, str, str]] = {
     "dataType":        ("String", "{c}", "data_type"),
     "success":         ("String", "lower({c}) = 'true'", "success"),
     "failureMessage":  ("String", "{c}", "failure_message"),
-    "bytes":           ("UInt64", "{c}", "bytes"),
-    "sentBytes":       ("UInt64", "{c}", "sent_bytes"),
-    "grpThreads":      ("UInt32", "{c}", "grp_threads"),
-    "allThreads":      ("UInt32", "{c}", "all_threads"),
+    "bytes":           ("Int64",  _U64, "bytes"),
+    "sentBytes":       ("Int64",  _U64, "sent_bytes"),
+    "grpThreads":      ("Int64",  _U32, "grp_threads"),
+    "allThreads":      ("Int64",  _U32, "all_threads"),
     "URL":             ("String", "{c}", "url"),
-    "Latency":         ("UInt32", "{c}", "latency"),
-    "IdleTime":        ("UInt32", "{c}", "idle_time"),
-    "Connect":         ("UInt32", "{c}", "connect"),
+    "Latency":         ("Int64",  _U32, "latency"),
+    "IdleTime":        ("Int64",  _U32, "idle_time"),
+    "Connect":         ("Int64",  _U32, "connect"),
     "Hostname":        ("String", "{c}", "hostname"),
 }
 REQUIRED_COLUMNS = ("timeStamp", "elapsed", "label")

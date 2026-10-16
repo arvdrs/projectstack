@@ -46,7 +46,7 @@ def analyze_file(
     path: str | Path,
     *,
     steady: str | None = None,
-    sla: str | None = None,
+    sla: str | dict | None = None,
     tag: str = "",
     scenario: str | None = None,
     props: str | Path | None = None,
@@ -64,7 +64,12 @@ def analyze_file(
     settings = settings or load_settings()
     if stats not in STATS_MODES:
         raise ValueError(f"--stats must be one of {', '.join(STATS_MODES)}")
-    sla_config = parse_sla(sla)          # validate before any work
+    # Validate before any work: a --sla spec string, or an SLA config as the web app stores it
+    if isinstance(sla, dict):
+        from projectstack.analyzer.sla import normalize_sla
+        sla_config = normalize_sla(sla)
+    else:
+        sla_config = parse_sla(sla)
     thresholds = RegressionThresholds.from_settings(settings, regression)
     plan = None
     if jmx:

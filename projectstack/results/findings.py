@@ -84,6 +84,7 @@ def build(meta: dict[str, Any], metrics: dict[str, Any], steady: dict[str, Any],
                     "last_offset_s": round((e["last_ms"] - start) / 1000)} for e in metrics.get("errors", [])[:10]],
         "findings": [f.as_dict(start) for f in findings],
         "skipped": skipped,
+        "warnings": list((meta.get("ingest") or {}).get("warnings") or []),   # about the file itself
         "truncated": {},
         "notes": [
             "Percentiles are exact over the samples in scope (JMeter Aggregate Report definition); "

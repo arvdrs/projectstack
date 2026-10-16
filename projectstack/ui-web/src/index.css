@@ -22,6 +22,12 @@
   /* Chart series (validated dark-mode categorical steps; status colours stay reserved) */
   --series-1: #3987e5;
   --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #9085e9;
+  --series-7: #008300;
+  --series-8: #e66767;
   --success: #3ccf7a;
   --success-rgb: 60, 207, 122;
   --warning: #e5a93b;

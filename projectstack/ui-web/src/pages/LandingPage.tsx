@@ -297,7 +297,7 @@ const steps = [
   { title: 'Record & upload', desc: 'Export a HAR from Chrome DevTools → Network and drop it in.' },
   { title: 'Correlate', desc: 'The engine finds every token, session ID and CSRF value and links extractor to usage.' },
   { title: 'Generate', desc: 'Set the load profile and think times, preview, then export the JMX.' },
-  { title: 'Run & analyse', desc: 'Execute with local JMeter and read throughput, p90/p95 and errors in the report.' },
+  { title: 'Run & analyse', desc: 'Execute with local JMeter, then get the run analysed: steady state, slowdowns, errors, a verdict and reports.' },
 ]
 
 const integrations = [
@@ -388,7 +388,7 @@ export default function LandingPage() {
 
             <motion.div className="lp-cta-row" initial={reduce ? false : { opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.8, duration: 0.6 }}>
               <button className="lp-btn lp-btn-primary" onClick={launch}>Generate your first script <ArrowRight size={16} /></button>
-              <button className="lp-btn lp-btn-ghost" onClick={() => scrollTo('how-it-works')}>See how it works</button>
+              <button className="lp-btn lp-btn-ghost" onClick={() => navigate('/analyze')}>Analyse test results</button>
             </motion.div>
 
             <motion.div className="lp-trust" initial={reduce ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.1, duration: 0.6 }}>

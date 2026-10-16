@@ -70,6 +70,8 @@ interface AppState {
   correlationAssessment: CorrelationAssessment | null
   jmx: string | null
   results: TestResults | null
+  // Results-analysis run of the last test run (cleared when a new run's results arrive)
+  analysisRunId: string | null
   currentStep: number
   maxReachedStep: number
   reportUrl: string | null
@@ -112,6 +114,7 @@ interface AppState {
   setCorrelationAssessment: (a: CorrelationAssessment | null) => void
   setJmx: (jmx: string) => void
   setResults: (results: TestResults) => void
+  setAnalysisRunId: (runId: string | null) => void
   setStep: (step: number) => void
   setReportUrl: (url: string | null) => void
   setSelectedRequests: (indices: number[] | null) => void
@@ -143,6 +146,7 @@ const initialState = {
   correlationAssessment: null,
   jmx: null,
   results: null,
+  analysisRunId: null,
   currentStep: 0,
   maxReachedStep: 0,
   reportUrl: null,
@@ -166,7 +170,7 @@ const initialState = {
 // Everything keyed by request index — invalid once the request list is re-parsed
 const perRequestState = {
   selectedRequestIndices: null, customAssertions: {}, requestOrder: null, transactionNames: {}, csvConfigs: {},
-  correlatedValues: [], correlationAssessment: null, jmx: null, results: null, reportUrl: null,
+  correlatedValues: [], correlationAssessment: null, jmx: null, results: null, analysisRunId: null, reportUrl: null,
   lastRunConfig: null, generatedLoadConfig: null, generatedThreadGroup: null,
 }
 
@@ -208,8 +212,11 @@ export const useAppStore = create<AppState>((set) => ({
     maxReachedStep: Math.max(state.maxReachedStep, 2),
   })),
 
+  setAnalysisRunId: (analysisRunId) => set({ analysisRunId }),
+
   setResults: (results) => set((state) => ({
     results,
+    analysisRunId: null,
     reportUrl: results.html_report_url ?? null,
     maxReachedStep: Math.max(state.maxReachedStep, 4),
   })),

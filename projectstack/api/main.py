@@ -16,6 +16,7 @@ import json
 import os
 import pickle
 import re
+import shutil
 import subprocess
 import tempfile
 import time
@@ -47,6 +48,7 @@ from projectstack.runner.jmeter_runner import (
 )
 from projectstack.runner.live_stats import LiveRun
 from projectstack.runner.metrics_parser import parse_jtl
+from projectstack.api.results_api import router as results_router
 from projectstack.analyzer.har_analyzer import analyze_har, scan_sensitive_data, detect_duplicates
 from projectstack.analyzer.report_analyzer import (
     parse_html_report, from_session_results, derive_insights, build_llm_context,
@@ -61,6 +63,7 @@ from projectstack.exporter.cicd_exporter import export_github_actions, export_je
 # ---------------------------------------------------------------------------
 
 app = FastAPI(title="ProjectStack API", version="1.0.0")
+app.include_router(results_router)      # results analysis: /api/results/…
 
 app.add_middleware(
     CORSMiddleware,
@@ -165,6 +168,16 @@ class SettingsUpdate(BaseModel):
     grafana_url: Optional[str] = None
     gmail_address: Optional[str] = None
     gmail_app_password: Optional[str] = None
+    aws_profile: Optional[str] = None
+    aws_region: Optional[str] = None
+    aws_access_key_id: Optional[str] = None
+    aws_secret_access_key: Optional[str] = None
+    aws_session_token: Optional[str] = None
+    azure_subscription_id: Optional[str] = None
+    azure_tenant_id: Optional[str] = None
+    azure_client_id: Optional[str] = None
+    azure_client_secret: Optional[str] = None
+    cloud_auto_fetch: Optional[str] = None
 
 
 class ShareReportRequest(BaseModel):
@@ -379,7 +392,8 @@ async def update_settings(body: SettingsUpdate):
     # Non-secret fields — update directly
     for field in ("ai_provider", "ollama_url", "ollama_model",
                   "jmeter_path", "default_threads", "default_rampup", "default_loops",
-                  "grafana_url", "gmail_address"):
+                  "grafana_url", "gmail_address", "aws_profile", "aws_region", "aws_access_key_id",
+                  "azure_subscription_id", "azure_tenant_id", "azure_client_id", "cloud_auto_fetch"):
         val = getattr(body, field, None)
         if val is not None:
             _settings[field] = str(val)
@@ -1717,6 +1731,31 @@ async def run_test(session_id: str, body: RunRequest):
         f"/api/jmeter-reports/{session_id}/html/index.html" if html_ready else None
     )
     return result_payload
+
+
+class AnalyzeRunRequest(BaseModel):
+    baseline: Optional[str] = "last-green"     # "" = no comparison
+    tag: Optional[str] = None
+
+
+@app.post("/api/results/analyze-session/{session_id}")
+async def analyze_session_run(session_id: str, body: AnalyzeRunRequest):
+    """Analyse the JTL of this session's last test run with the results engine (a background job)."""
+    from projectstack.api.results_api import start_job, upload_path
+    session = _get_session(session_id)
+    jtl = REPORTS_BASE_DIR / session_id / "results.jtl"
+    if not jtl.exists() or jtl.stat().st_size == 0:
+        raise HTTPException(status_code=400, detail="This session has no test results yet — run the test first")
+    # Work on a copy: the next run in this session rewrites results.jtl
+    copy = upload_path("results.jtl")
+    await asyncio.to_thread(shutil.copyfile, jtl, copy)
+    test_name = _report_meta(session, session_id, {})["test_name"]
+    sla = ((session.get("results") or {}).get("sla") or {}).get("config")
+    jmx = session.get("jmx_path") if session.get("jmx_path") and Path(session["jmx_path"]).exists() else None
+    job = start_job(copy, source=f"{test_name} (test run)", scenario=test_name, tag=body.tag or "app run",
+                    sla=sla, baseline=body.baseline or None, jmx=jmx, session_id=session_id)
+    job.log(f"Analysing the results of the last run of {test_name}")
+    return {**job.__dict__}
 
 
 @app.get("/api/run-live/{session_id}")

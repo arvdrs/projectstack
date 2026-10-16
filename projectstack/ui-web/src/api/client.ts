@@ -353,6 +353,16 @@ export interface Settings {
   grafana_url: string
   gmail_address: string
   gmail_app_password: string
+  aws_profile?: string
+  aws_region?: string
+  aws_access_key_id?: string
+  aws_secret_access_key?: string
+  aws_session_token?: string
+  azure_subscription_id?: string
+  azure_tenant_id?: string
+  azure_client_id?: string
+  azure_client_secret?: string
+  cloud_auto_fetch?: string
 }
 
 export interface ProviderInfo {
@@ -926,4 +936,410 @@ export async function downloadGrafanaDashboard(sessionId: string): Promise<void>
   a.href = url
   document.body.appendChild(a); a.click()
   document.body.removeChild(a); URL.revokeObjectURL(url)
+}
+
+// ---------------------------------------------------------------------------
+// Results analysis (JTL → ClickHouse → findings, reports, compare, ask)
+// ---------------------------------------------------------------------------
+
+export interface ResultsStatus {
+  available: boolean
+  version?: string
+  server?: string
+  runs?: number
+  message?: string
+  hint?: string
+}
+
+export type AnalysisJobStatus = 'queued' | 'running' | 'done' | 'failed'
+
+export interface AnalysisJob {
+  id: string
+  source: string
+  status: AnalysisJobStatus
+  progress: string[]
+  run_id: string | null
+  error: string | null
+  session_id?: string | null
+}
+
+export type RunVerdict = 'pass' | 'at_risk' | 'fail' | 'no_sla'
+export type FindingSeverity = 'critical' | 'warning' | 'info'
+
+export interface ResultsRunRow {
+  run_id: string
+  created_at: string
+  scenario: string
+  tag: string
+  samples: number
+  peak_threads: number
+  verdict: RunVerdict | 'unknown' | string
+  summary: { p95_ms?: number; error_pct?: number; tps?: number; samples?: number }
+  start_ms: number
+  end_ms: number
+}
+
+export interface LabelStats {
+  label: string
+  samples: number
+  avg_ms: number
+  p50_ms: number
+  p90_ms: number
+  p95_ms: number
+  p99_ms: number
+  max_ms: number
+  error_pct: number
+  tps: number
+}
+
+export interface OverallStats extends Omit<LabelStats, 'label'> {
+  min_ms: number
+  errors: number
+}
+
+export interface TimelinePoint {
+  t_offset_s: number
+  users: number
+  tps: number
+  p95_ms: number
+  samples: number
+  errors: number
+  error_pct: number
+}
+
+export interface AnalysisFinding {
+  n: number
+  type: string
+  severity: FindingSeverity
+  title: string
+  detail: string
+  start_offset_s?: number
+  end_offset_s?: number
+  labels: string[]
+  evidence: Record<string, unknown>
+}
+
+export interface Observations {
+  headline: string
+  key_points: string[]
+  business_impact: string
+  recommended_action: string
+}
+
+export interface NumberCheckResult { checked: number; unverified: { field: string; text: string }[]; ok: boolean }
+
+export interface AiObservations {
+  content: Observations
+  provider?: string | null
+  prompt?: string | null
+  numbers?: NumberCheckResult | null
+  source?: string
+  note?: string
+  warnings?: string[]
+}
+
+export interface SlaCheckRow {
+  kind: 'response_time' | 'error_rate' | 'throughput'
+  label: string | null
+  metric: string
+  unit: string
+  target: number
+  actual: number
+  passed: boolean
+}
+
+export interface BaselineInfo {
+  requested: string
+  found: boolean
+  note?: string
+  run_id?: string
+  tag?: string
+  created_at?: string
+  gating?: boolean
+  load?: { baseline_users: number; current_users: number; baseline_tps: number; current_tps: number; kind: string; comparable: boolean; reason: string }
+  summary?: { compared: number; regressed: number; improved: number; too_few_samples: number }
+  thresholds?: { p95_pct: number; p95_ms: number; err_pp: number; min_samples: number; load_pct: number }
+}
+
+export interface RunAnalysis {
+  run: {
+    run_id: string; scenario: string; tag: string; start: string; end: string; duration_s: number
+    samples: number; peak_users: number; labels: { request: number; transaction: number; subresult: number }
+  }
+  steady: { start_offset_s: number; end_offset_s: number; duration_s: number; source: string; note?: string; method?: string }
+  verdict: RunVerdict
+  sla: { defined: boolean; targets?: string[]; checks?: SlaCheckRow[]; passed?: boolean; failed_count?: number }
+  baseline?: BaselineInfo
+  overall: { request?: OverallStats; transaction?: OverallStats }
+  labels: { request?: LabelStats[]; transaction?: LabelStats[]; subresult?: LabelStats[] }
+  timeline: { bucket_s: number; points: TimelinePoint[] }
+  errors: { label: string; response_code: string; response_message: string; failure: string; count: number; first_offset_s: number; last_offset_s: number }[]
+  findings: AnalysisFinding[]
+  skipped: { detector: string; reason: string }[]
+  warnings?: string[]
+  truncated: Record<string, unknown>
+  created_at?: string
+  source_file?: string
+  has_plan: boolean
+  observations: Observations
+  observations_ai: AiObservations | null
+}
+
+export interface AskQuery { n: number; sql: string; columns: string[]; rows: string[][]; truncated: boolean; seconds: number; error: string }
+
+export interface AskAnswer {
+  question: string
+  answer: string
+  queries: AskQuery[]
+  provider: string
+  prompt: string
+  numbers: NumberCheckResult | null
+  stopped: string
+  warning?: string | null
+}
+
+export interface AnalyzeOptions {
+  scenario?: string
+  tag?: string
+  sla?: Partial<SlaConfig> | null
+  steady?: string
+  baseline?: string
+}
+
+export async function getResultsStatus(): Promise<ResultsStatus> {
+  return fetchJson(`${API_BASE}/results/status`)
+}
+
+export function analyzeJtl(file: File, opts: AnalyzeOptions = {},
+  onProgress?: (sent: number, total: number) => void): Promise<AnalysisJob> {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('scenario', opts.scenario ?? '')
+  form.append('tag', opts.tag ?? '')
+  form.append('sla', opts.sla ? JSON.stringify(opts.sla) : '')
+  form.append('steady', opts.steady ?? '')
+  form.append('baseline', opts.baseline ?? '')
+  // XMLHttpRequest rather than fetch: result files can be several GB, and only XHR reports upload progress
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', `${API_BASE}/results/analyze`)
+    xhr.upload.onprogress = e => { if (e.lengthComputable && onProgress) onProgress(e.loaded, e.total) }
+    xhr.onload = () => {
+      let body: { detail?: string } & Partial<AnalysisJob> = {}
+      try { body = JSON.parse(xhr.responseText) } catch { /* not JSON */ }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(body as AnalysisJob)
+      else reject(new Error(body.detail || `Upload failed (${xhr.status} ${xhr.statusText})`))
+    }
+    xhr.onerror = () => reject(new Error('Upload failed: the server could not be reached'))
+    xhr.onabort = () => reject(new Error('Upload cancelled'))
+    xhr.send(form)
+  })
+}
+
+export async function analyzeSessionRun(sessionId: string, baseline = 'last-green'): Promise<AnalysisJob> {
+  return fetchJson(`${API_BASE}/results/analyze-session/${sessionId}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ baseline }),
+  })
+}
+
+export async function getAnalysisJob(jobId: string): Promise<AnalysisJob> {
+  return fetchJson(`${API_BASE}/results/jobs/${jobId}`)
+}
+
+export async function listResultRuns(limit = 100): Promise<{ runs: ResultsRunRow[] }> {
+  return fetchJson(`${API_BASE}/results/runs?limit=${limit}`)
+}
+
+export async function getResultRun(runId: string): Promise<RunAnalysis> {
+  return fetchJson(`${API_BASE}/results/runs/${encodeURIComponent(runId)}`)
+}
+
+export async function aiObservations(runId: string, fresh = false): Promise<AiObservations> {
+  return fetchJson(`${API_BASE}/results/runs/${encodeURIComponent(runId)}/observations`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fresh }),
+  })
+}
+
+export function resultReportUrl(runId: string, audience: 'tech' | 'exec', ai = false): string {
+  return `${API_BASE}/results/runs/${encodeURIComponent(runId)}/report?audience=${audience}${ai ? '&ai=true' : ''}`
+}
+
+export async function downloadResultReport(runId: string, audience: 'tech' | 'exec', format: 'html' | 'md', ai = false): Promise<void> {
+  return downloadUrl(`${resultReportUrl(runId, audience, ai)}&format=${format}&download=true`, `${runId}_${audience}.${format}`)
+}
+
+export async function askRun(runId: string, question: string): Promise<AskAnswer> {
+  return fetchJson(`${API_BASE}/results/runs/${encodeURIComponent(runId)}/ask`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question }),
+  })
+}
+
+export async function deleteResultRun(runId: string): Promise<{ deleted: string }> {
+  return fetchJson(`${API_BASE}/results/runs/${encodeURIComponent(runId)}`, { method: 'DELETE' })
+}
+
+// -- per-label detail and synthesis report -----------------------------------
+
+export type LabelStatus = 'critical' | 'attention' | 'healthy' | 'idle'
+
+export interface LabelPoint {
+  t_offset_s: number; samples: number; errors: number; tps: number
+  p50_ms: number; p95_ms: number; p99_ms: number; avg_ms: number; error_pct: number
+}
+
+export interface LabelDetail {
+  run_id: string
+  label: string
+  kind: 'request' | 'transaction' | 'subresult'
+  status: LabelStatus
+  synthesis: string[]
+  steady: OverallStats
+  whole_run: OverallStats
+  ladder: { p: number; ms: number }[]
+  histogram: { bin_ms: number; bins: { from_ms: number; to_ms: number; samples: number }[]; overflow: number }
+  share_pct: number
+  stddev_ms: number
+  timeline: { bucket_s: number; points: LabelPoint[] }
+  codes: { code: string; samples: number; failed: number; share_pct: number }[]
+  errors: { code: string; message: string; count: number; first_offset_s: number; last_offset_s: number }[]
+  slowest: { t_offset_s: number; elapsed_ms: number; latency_ms: number; code: string; success: boolean; thread: string }[]
+  breakdown: { connect_ms: number; server_ms: number; download_ms: number; avg_ms: number; bytes: number; sent_bytes: number } | null
+  findings: { n: number; type: string; severity: FindingSeverity; title: string }[]
+  sla: SlaCheckRow[]
+  baseline: {
+    run_id: string; tag?: string; samples: number; p50_ms?: number; p95_ms: number; p99_ms?: number
+    error_pct: number; tps?: number; p95_change_pct: number | null; err_change_pp: number
+  } | null
+  window: { start_offset_s: number; end_offset_s: number }
+}
+
+export async function getLabelDetail(runId: string, label: string): Promise<LabelDetail> {
+  return fetchJson(`${API_BASE}/results/runs/${encodeURIComponent(runId)}/label?name=${encodeURIComponent(label)}`)
+}
+
+export async function listRunLabels(runId: string): Promise<{ labels: (LabelStats & { kind: string })[] }> {
+  return fetchJson(`${API_BASE}/results/runs/${encodeURIComponent(runId)}/labels`)
+}
+
+export function labelsReportUrl(runId: string): string {
+  return `${API_BASE}/results/runs/${encodeURIComponent(runId)}/labels-report`
+}
+
+export async function downloadLabelsReport(runId: string, format: 'html' | 'md'): Promise<void> {
+  return downloadUrl(`${labelsReportUrl(runId)}?format=${format}&download=true`, `${runId}_requests_transactions.${format}`)
+}
+
+// -- comparing two analysed runs ---------------------------------------------
+
+export interface CompareRow {
+  kind: string; label: string
+  baseline: { samples: number; p95_ms: number; error_pct: number; tps: number }
+  current: { samples: number; p95_ms: number; error_pct: number; tps: number }
+  p95_change_ms: number | null; p95_change_pct: number | null; err_change_pp: number | null; tps_change_pct: number | null
+  status: 'regressed' | 'improved' | 'same' | 'too_few_samples'
+  regressed: string[]; improved: string[]; severity?: FindingSeverity
+}
+
+export interface ComparedRun {
+  run: RunAnalysis['run']
+  verdict: RunVerdict
+  overall: RunAnalysis['overall']
+  steady: RunAnalysis['steady']
+  timeline: RunAnalysis['timeline']
+  sla: RunAnalysis['sla']
+  findings: { n: number; type: string; severity: FindingSeverity; title: string; labels: string[] }[]
+}
+
+export interface RunComparison {
+  baseline: { run_id: string; scenario: string; tag: string; created_at: string; verdict: string; users: number }
+  current: { run_id: string; scenario: string; tag: string; created_at: string; verdict: string; users: number }
+  load: { baseline_users: number; current_users: number; users_change_pct: number | null; baseline_tps: number
+          current_tps: number; tps_change_pct: number | null; kind: string; comparable: boolean; reason: string }
+  thresholds: { p95_pct: number; p95_ms: number; err_pp: number; min_samples: number; load_pct: number }
+  kinds: Record<string, { labels: CompareRow[]; overall: CompareRow | null }>
+  only_in_baseline: Record<string, string[]>
+  only_in_current: Record<string, string[]>
+  regressions: unknown[]
+  summary: { compared: number; regressed: number; improved: number; too_few_samples: number }
+  gating: boolean
+  runs: { baseline: ComparedRun | null; current: ComparedRun | null }
+  findings_diff: { new: ComparedRun['findings']; resolved: ComparedRun['findings']; persisting: ComparedRun['findings'] }
+}
+
+export async function compareRuns(base: string, current: string): Promise<RunComparison> {
+  return fetchJson(`${API_BASE}/results/compare?base=${encodeURIComponent(base)}&current=${encodeURIComponent(current)}`)
+}
+
+export async function downloadComparison(base: string, current: string): Promise<void> {
+  return downloadUrl(`${API_BASE}/results/compare/report?base=${encodeURIComponent(base)}&current=${encodeURIComponent(current)}`,
+    `compare_${base}_vs_${current}.md`)
+}
+
+// -- server metrics from AWS CloudWatch / Azure Monitor -----------------------
+
+export type CloudProvider = 'aws' | 'azure'
+
+export interface CloudResource { provider: CloudProvider; type: string; id: string; name: string; region: string; role: string }
+
+export interface CloudCatalog {
+  types: { provider: CloudProvider; type: string; title: string; category: string
+           metrics: { key: string; label: string; unit: string; note: string }[] }[]
+  categories: Record<string, string>
+}
+
+export interface ServerSeries {
+  provider: CloudProvider; resource_type: string; resource_id: string; resource: string; role: string; region: string
+  metric: string; label: string; kind: string; unit: string; period_s: number
+  points: { t_offset_s: number; value: number }[]
+}
+
+export interface ServerMetrics {
+  run_id: string; scenario: string; available: boolean
+  summary: { fetched_at: string; period_s: number
+             resources: { name: string; provider: string; type: string; role: string
+                          metrics: { metric: string; label: string; unit: string; steady_avg: number | null; max: number; max_offset_s: number }[] }[]
+             missing: { resource: string; metric: string; why: string }[]; warnings: string[] } | null
+  series: ServerSeries[]
+  resources: CloudResource[]
+  missing: { resource: string; metric: string; why: string }[]
+  warnings: string[]
+  fetched_at: string | null
+  steady: RunAnalysis['steady']
+  duration_s: number
+  findings: (AnalysisFinding & { evidence: Record<string, unknown> })[]
+}
+
+export async function getCloudCatalog(): Promise<CloudCatalog> {
+  return fetchJson(`${API_BASE}/results/cloud/catalog`)
+}
+
+export async function getCloudStatus(): Promise<Record<CloudProvider, { sdk: boolean; auth: string; region?: string; subscription?: string }>> {
+  return fetchJson(`${API_BASE}/results/cloud/status`)
+}
+
+export async function checkCloud(provider: CloudProvider): Promise<Record<string, string | boolean | null>> {
+  return fetchJson(`${API_BASE}/results/cloud/check`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider }),
+  })
+}
+
+export async function discoverCloud(provider: CloudProvider, types: string[], region = ''): Promise<{ resources: CloudResource[]; warnings: string[] }> {
+  const q = new URLSearchParams({ provider, types: types.join(','), region })
+  return fetchJson(`${API_BASE}/results/cloud/discover?${q}`)
+}
+
+export async function getCloudTargets(scenario: string): Promise<{ resources: CloudResource[] }> {
+  return fetchJson(`${API_BASE}/results/cloud/targets?scenario=${encodeURIComponent(scenario)}`)
+}
+
+export async function getServerMetrics(runId: string): Promise<ServerMetrics> {
+  return fetchJson(`${API_BASE}/results/runs/${encodeURIComponent(runId)}/server-metrics`)
+}
+
+export async function fetchServerMetrics(runId: string, resources: CloudResource[]): Promise<{
+  series: number; findings: number; verdict: string; missing: { resource: string; metric: string; why: string }[]; warnings: string[]
+}> {
+  return fetchJson(`${API_BASE}/results/runs/${encodeURIComponent(runId)}/server-metrics`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ resources, save: true }),
+  })
 }

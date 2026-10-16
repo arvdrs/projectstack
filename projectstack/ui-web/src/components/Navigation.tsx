@@ -79,7 +79,10 @@ export default function Navigation() {
         }}
       >
         <NavLink to="/app" style={({ isActive }) => linkStyle(isActive)}>
-          App
+          HAR → JMX
+        </NavLink>
+        <NavLink to="/analyze" style={({ isActive }) => linkStyle(isActive)}>
+          Analyse Results
         </NavLink>
         <NavLink to="/settings" style={({ isActive }) => linkStyle(isActive)}>
           Settings

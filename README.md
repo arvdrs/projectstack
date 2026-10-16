@@ -15,6 +15,37 @@ load-generator problems) and writes a compact `findings.json`. It is built for
 large files (hundreds of MB to several GB). Every number is computed by code from
 the raw samples; nothing is estimated by a model.
 
+### In the web app
+
+- **Analyse Results** (top navigation, or "Analyse test results" on the home page): upload a JTL from
+  any test, optionally with an SLA, a scenario name, a build tag and a baseline to compare with. You
+  get the verdict, plain-language observations, the timeline, findings with evidence, per-transaction
+  tables, the comparison with the baseline, the technical and executive reports, and a box to ask
+  questions about the run. Earlier analyses are listed on the same page.
+- **After a test run** (step 4, Run Test): when JMeter finishes, ProjectStack offers to analyse the
+  run. It uses the run's results, the SLA you set in step 3 and the generated script (so correlation
+  problems point at the extractor responsible), compares the run with the last passing run of the
+  same script, and shows the high-level observations with a link to the full analysis.
+
+- **Per request and transaction**: click any label on a run's page (or search for it among all the
+  run's labels) for its own page: a plain-language summary and a status (needs action / worth a look /
+  healthy), its timeline with p50/p95/p99, the response-time distribution, percentiles, where the time
+  goes (connecting, waiting for the server, downloading), response codes, errors, the slowest samples,
+  the findings that name it and its change from the baseline. **Requests & transactions** opens the
+  same as one report with a section per transaction and main request (HTML or Markdown).
+- **Compare runs**: **Compare** on a run's page (against the previous run of the scenario, the last
+  passing one, or any run), or tick two runs in the list. Headline figures side by side, both
+  timelines overlaid, every label's change with regressions and improvements, which findings are new,
+  resolved or still present, and a Markdown export.
+- **Server metrics**: **Choose resources** in a run's Server metrics card reads CPU, memory,
+  connections, latency, errors and capacity from AWS CloudWatch or Azure Monitor for the run's
+  window and charts them under the test's p95. Server problems join the findings, linked to the
+  slowdowns they coincide with. See [Server metrics from AWS and Azure](#server-metrics-from-aws-and-azure).
+
+Both need the local ClickHouse (below); the page shows the command to start it when it is not
+running. Nothing is sent to an AI service unless you click **AI summary**, tick **AI narrative**
+for a report, or ask a question.
+
 ### Setup
 
 ProjectStack uses a local ClickHouse by default:
@@ -184,6 +215,30 @@ again), so rendering the other format costs nothing.
 | 2 | Run not found, unreadable findings.json, or the chosen AI provider failed |
 | 3 | `--strict-numbers`: the AI narrative cited numbers that are not in findings.json |
 
+### Requests and transactions report
+
+```bash
+pstack labels 20261013-1019                         # report_labels.html in the run's folder
+pstack labels 20261013-1019 --format md --limit 80  # every transaction, then up to 80 labels in all
+pstack labels 20261013-1019 "TC Checkout"           # one label's summary in the terminal
+```
+
+```
+TC Checkout  (transaction) — ✖ needs action
+  • Ran 43,508 times in the steady state (39.59 per second), 100% of all transaction time.
+  • Half the responses took up to 614 ms, 95% up to 873 ms, 99% up to 1,012 ms; the slowest took 1,514 ms.
+  • SLA p95 ≤ 3,000 ms: met (873 ms).
+  • Compared with build-120: p95 584 ms → 873 ms (50% slower); errors 0.52% → 0.46%.
+```
+
+A section per label: the summary, statistics for the steady state and the whole run (and the
+baseline), the percentile ladder up to p99.9, the response-time distribution, where the time goes,
+response codes, errors and the slowest samples. The report covers every transaction, then requests
+named in findings or SLA checks, then the busiest requests. Statuses and summaries are rule-based:
+“needs action” for a missed SLA, a critical finding or at least 5% errors; “worth a look” for 1%
+errors or more, a long tail (p99 at least 3× p50), a slowdown during the steady state or a warning
+finding. Nothing in it is written by AI.
+
 ### AI providers
 
 Correlation, reports and the `ask` command share one AI layer
@@ -264,6 +319,74 @@ window it was analysed with, as long as they are within the retention period.
 `pstack analyze --baseline` writes `comparison.json` (every label) next to
 `findings.json`, which keeps a compact `baseline` block and the regression
 findings that reports explain.
+
+### Server metrics from AWS and Azure
+
+A slow test only tells half the story. ProjectStack can read the platform metrics of the servers
+behind the test from **AWS CloudWatch** (`GetMetricData`) and **Azure Monitor** for the run's time
+window (plus 5 minutes either side), keep them in ClickHouse (`server_metrics`) and analyse them
+together with the test. Access is read-only and only metric values are read.
+
+**Sign-in** — Settings → Cloud Monitoring, or the settings file. Leave the keys empty to use this
+machine's own sign-in:
+
+| | Machine sign-in (keys empty) | Keys in Settings | Permissions |
+| --- | --- | --- | --- |
+| AWS | `aws_profile`, else the default chain (environment, `~/.aws`, SSO, instance role) | `aws_access_key_id`, `aws_secret_access_key`, optional `aws_session_token` | `CloudWatchReadOnlyAccess`; `ViewOnlyAccess` to find resources |
+| Azure | `az login`, environment variables or a managed identity | service principal: `azure_tenant_id`, `azure_client_id`, `azure_client_secret` | Monitoring Reader; Reader to find resources (needs `azure_subscription_id`) |
+
+Secrets are stored like the AI keys and only shown masked. **Save and test** in Settings
+(or `pstack cloud check`) shows which identity is used.
+
+**Choose the resources** once per scenario — on a run's page (**Choose resources**: find them by
+type and region, or add one by its id, and give each a role such as *app* or *database*) or with the
+CLI. They are saved for the scenario, and every later analysis of that scenario fetches their
+metrics automatically (turn off with `cloud_auto_fetch`).
+
+```bash
+pstack cloud check                                        # who am I, on AWS and Azure
+pstack cloud discover --provider aws --type rds --type alb --region ap-south-1
+pstack cloud targets search --add aws:rds:orders-db::database \
+                            --add aws:alb:app/web-alb/50dc6c495c0c9188::load-balancer
+pstack server-metrics 20261013-1019                       # fetch for an existing run
+```
+
+A resource spec is `provider:type:id[:name[:role]]`: the instance id, DB identifier, the
+`app/…`/`net/…` part of a load balancer ARN, `cluster/service` for ECS, or the full resource id on
+Azure.
+
+| Category | AWS | Azure |
+| --- | --- | --- |
+| Virtual machines | EC2 instance, Auto Scaling group | Virtual machine, VM scale set |
+| Containers | ECS service, EKS cluster (Container Insights) | AKS cluster, Container App |
+| Databases and caches | RDS instance, Aurora cluster, ElastiCache node | Azure SQL database, PostgreSQL / MySQL flexible server, Azure Cache for Redis |
+| Load balancers and app platforms | Application / Network Load Balancer, API Gateway (REST), Lambda | App Service app and plan, Application Gateway, Load Balancer |
+
+Each type has a preset of the metrics that matter under load (CPU, memory, CPU credits,
+connections, latency, IOPS and queue depth, 5xx and throttles, evictions, instance counts, unhealthy
+hosts). Memory on EC2 needs the CloudWatch agent, and EKS needs Container Insights; metrics that come
+back empty are listed with the reason.
+
+**Server findings** are made by the same kind of deterministic rules as the test findings:
+
+- CPU at 85% or more for at least 3 minutes (critical from 95% or over half the steady state);
+  CPU credits running out
+- memory at 90% or more, or growing through the run (a leak or a cache filling up)
+- server errors, throttling or cache evictions during the test
+- database queue depth, and latency that steps up (at least 1.5× and 5 ms)
+- connections held at their peak for 5 minutes or more (a pool or server limit)
+- scaling events and unhealthy hosts
+
+A server finding within 2 minutes of a test finding is **linked** to it, in both directions ("At
+the same time on the servers: CPU at 91% on orders-db"), and raised one level (info → warning,
+warning → critical) when the slowdown it coincides with is critical. Server findings change the
+verdict like any other finding, and the reports and observations name the likely cause and the next
+test to run. The AI narrative sees the
+findings and a per-resource summary in `findings.json`, never the series.
+
+**Retention**: CloudWatch keeps 1-minute values for 15 days, 5-minute values for 63 days and hourly
+values for 15 months, so fetch soon after the test; ProjectStack uses the finest resolution still
+available. Azure Monitor keeps platform metrics for 93 days.
 
 ### CI mode
 

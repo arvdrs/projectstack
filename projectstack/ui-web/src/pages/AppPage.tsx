@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 
 import ReportAnalyzer from '../components/ReportAnalyzer'
+import AnalyzeRunPrompt from '../components/results/AnalyzeRunPrompt'
 import LiveRunMonitor from '../components/LiveRunMonitor'
 import {
   useAppStore, activeSla, EMPTY_SLA, DEFAULT_THREAD_GROUP,
@@ -4274,6 +4275,7 @@ function StepRun() {
               </Btn>
             )}
           </div>
+          {sessionId && <AnalyzeRunPrompt sessionId={sessionId} />}
         </motion.div>
       )}
 

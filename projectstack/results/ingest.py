@@ -196,10 +196,17 @@ def ingest(db: ResultsDB, run_id: str, info: FileInfo, max_bad_rows: int = 0) ->
     else:
         settings["format_csv_delimiter"] = info.delimiter
     struct_sql = ", ".join(f"{_ident(n)} {t}" for n, t in structure)
+    # A negative elapsed time is not a measurement (JMeter writes elapsed = -startTime for a
+    # Transaction Controller that never completed, e.g. when the test stops): skip those rows
+    where = f" WHERE {_ident(present['elapsed'])} >= 0" if "elapsed" in present else ""
     sql = (f"INSERT INTO {db.db}.samples ({', '.join(targets)}) "
-           f"SELECT {', '.join(exprs[t] for t in targets)} FROM input({quote_literal(struct_sql)}) FORMAT {fmt}")
+           f"SELECT {', '.join(exprs[t] for t in targets)} FROM input({quote_literal(struct_sql)}){where} FORMAT {fmt}")
     summary = db.stream_insert(sql, chunks, settings, gzip_body=gz)
     rows = int(summary.get("written_rows", 0) or 0)
+    read = int(summary.get("read_rows", 0) or 0)
+    if where and read > rows:
+        warnings.append(f"Skipped {read - rows:,} sample(s) with a negative elapsed time — JMeter writes these for "
+                        "Transaction Controllers that did not complete (for example when threads are stopped)")
     if "SampleCount" in present or "SampleCount" in columns:
         warnings.append("The file has a SampleCount column — rows may aggregate several samples; counts are per row")
     return IngestResult(rows, time.monotonic() - started, info, warnings)

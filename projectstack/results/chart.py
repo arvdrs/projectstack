@@ -180,6 +180,26 @@ def _bands(doc: dict[str, Any], x, x0: float, x1: float) -> list[dict[str, Any]]
     return out
 
 
+def sparkline_svg(values: list[float], unit: str = "", width: int = 180, height: int = 40) -> str:
+    """A small line for one measure over the run (per-label report); min, max and last value as text."""
+    vals = [float(v or 0) for v in values]
+    if not vals:
+        return ""
+    top = max(vals) or 1
+    pad = 3
+    xs = [pad + i * (width - 2 * pad) / max(len(vals) - 1, 1) for i in range(len(vals))]
+    ys = [height - pad - (v / top) * (height - 2 * pad) for v in vals]
+    shape = (f'<circle cx="{xs[0]:.1f}" cy="{ys[0]:.1f}" r="2.5" class="sp-line-dot"/>' if len(vals) == 1 else
+             '<path class="sp-line" d="M' + " L".join(f"{x:.1f},{y:.1f}" for x, y in zip(xs, ys)) + '"/>')
+
+    def fmt_v(v: float) -> str:
+        return f"{v:,.0f}" if v >= 100 or unit == "ms" else f"{v:,.2f}".rstrip("0").rstrip(".")
+    label = f"min {fmt_v(min(vals))}{unit}, max {fmt_v(max(vals))}{unit}, last {fmt_v(vals[-1])}{unit}"
+    return (f'<svg class="sp" viewBox="0 0 {width} {height}" width="{width}" height="{height}" role="img" '
+            f'aria-label="{escape(label)}"><title>{escape(label)}</title>'
+            f'<line class="sp-base" x1="{pad}" x2="{width - pad}" y1="{height - pad}" y2="{height - pad}"/>{shape}</svg>')
+
+
 # Hover layer: crosshair snapped to the nearest bucket, one tooltip with every panel's value.
 SCRIPT = """
 (function () {

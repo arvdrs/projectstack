@@ -126,6 +126,21 @@ dl.ev dd { margin: 0; font-variant-numeric: tabular-nums; }
 </section>
 {% endif %}
 
+{% if server %}
+<section class="card">
+  <h2>Server metrics</h2>
+  <p class="small muted">From {{ server.resources|map(attribute="provider")|unique|map("upper")|join(" and ") }} monitoring, {{ server.period_s // 60 }}-minute values for the run's window. Server findings are in the findings list below.</p>
+  {% for r in server.resources if r.metrics %}
+  <h3 style="margin-top:12px">{{ r.name }} <span class="muted small">· {{ r.type }}{% if r.role %} · {{ r.role }}{% endif %}</span></h3>
+  <div class="scroll"><table>
+    <thead><tr><th>Metric</th><th class="n">Steady-state average</th><th class="n">Peak</th><th>Peak at</th></tr></thead>
+    <tbody>{% for m in r.metrics %}<tr><td>{{ m.label }}</td><td class="n">{{ server_value(m.steady_avg, m.unit) }}</td><td class="n">{{ server_value(m.max, m.unit) }}</td><td>{{ m.max_offset_s|offset }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+  {% endfor %}
+  {% if server.missing %}<p class="small muted">No data: {% for x in server.missing %}{{ x.resource }} {{ x.metric }} ({{ x.why }}){% if not loop.last %}; {% endif %}{% endfor %}.</p>{% endif %}
+</section>
+{% endif %}
+
 <section class="card">
   <h2>Timeline</h2>
   {{ chart }}
@@ -249,6 +264,7 @@ dl.ev dd { margin: 0; font-variant-numeric: tabular-nums; }
 
 <footer>
   <p>Steady state: {{ steady.get("note") or (steady.start_offset_s|offset ~ " to " ~ steady.end_offset_s|offset) }}.</p>
+  {% for w in doc.get("warnings") or [] %}<p>Data: {{ w }}.</p>{% endfor %}
   {% for note in notes %}<p>{{ note }}</p>{% endfor %}
   {% if truncated %}<p>findings.json was reduced to fit its size budget: {% for k, v in truncated.items() %}{{ k }}{% if not loop.last %}, {% endif %}{% endfor %}.</p>{% endif %}
   <p>Narrative: {% if narrative.source == "llm" %}written by {{ narrative.provider }} with prompt {{ narrative.prompt }}; {{ number_check }}.{% else %}rule-based (no AI){% if narrative.note %} — {{ narrative.note }}{% endif %}.{% endif %}

@@ -27,6 +27,10 @@ class ResultsDBError(RuntimeError):
     """A ClickHouse problem, explained for the user."""
 
 
+class ResultsDBUnavailable(ResultsDBError):
+    """ClickHouse could not be reached (not running, wrong host or port)."""
+
+
 @dataclass
 class ClickHouseConfig:
     host: str = "localhost"
@@ -107,7 +111,7 @@ class ResultsDB:
                 secure=cfg.secure, connect_timeout=5, send_receive_timeout=600,
             )
         except Exception as exc:
-            raise ResultsDBError(_connect_hint(cfg, exc)) from exc
+            raise ResultsDBUnavailable(_connect_hint(cfg, exc)) from exc
 
     # ------------------------------------------------------------------
     # Schema
@@ -164,7 +168,7 @@ class ResultsDB:
         except ClickHouseError as exc:
             text = str(exc)
             if "Connection refused" in text or "Max retries exceeded" in text:
-                raise ResultsDBError(_connect_hint(self.cfg, exc)) from exc
+                raise ResultsDBUnavailable(_connect_hint(self.cfg, exc)) from exc
             raise ResultsDBError(_clean_server_error(text.split("server response:", 1)[-1])) from exc
 
     # ------------------------------------------------------------------
@@ -186,7 +190,7 @@ class ResultsDB:
             resp = requests.post(self.cfg.http_url, params=params, data=iter(chunks), headers=headers,
                                  auth=(self.cfg.user, self.cfg.password), timeout=(10, None))
         except requests.ConnectionError as exc:
-            raise ResultsDBError(_connect_hint(self.cfg, exc)) from exc
+            raise ResultsDBUnavailable(_connect_hint(self.cfg, exc)) from exc
         if resp.status_code != 200:
             raise ResultsDBError(_clean_server_error(resp.text))
         try:
@@ -221,7 +225,7 @@ def connect(settings: dict[str, str] | None = None, url: str | None = None) -> R
     except ResultsDBError:
         raise
     except Exception as exc:
-        raise ResultsDBError(_connect_hint(cfg, exc)) from exc
+        raise ResultsDBUnavailable(_connect_hint(cfg, exc)) from exc
     return db
 
 

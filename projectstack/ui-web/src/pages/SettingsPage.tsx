@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import { Eye, EyeOff, Save, CheckCircle, AlertCircle, Terminal, Sliders, Loader2, Cpu, Activity, Mail, ShieldCheck, Layers, Upload, Trash2 } from 'lucide-react'
-import { getSettings, updateSettings, verifyGmail, getRulePacks, uploadRulePack, deleteRulePack, getJmeterInfo, type Settings, type RulePack, type JmeterInfo } from '../api/client'
+import { Eye, EyeOff, Save, CheckCircle, AlertCircle, Terminal, Sliders, Loader2, Cpu, Activity, Mail, ShieldCheck, Layers, Upload, Trash2, Cloud } from 'lucide-react'
+import { getSettings, updateSettings, verifyGmail, getRulePacks, uploadRulePack, deleteRulePack, getJmeterInfo, checkCloud, type Settings, type RulePack, type JmeterInfo } from '../api/client'
 
 // ---------------------------------------------------------------------------
 // Provider definitions (mirrors llm_router.py PROVIDERS)
@@ -215,6 +215,42 @@ function ApiKeyField({
         </p>
       )}
     </Field>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Cloud sign-in check
+// ---------------------------------------------------------------------------
+
+function CloudCheckButton({ provider, save }: { provider: 'aws' | 'azure'; save: () => Promise<unknown> }) {
+  const [state, setState] = useState<{ busy: boolean; ok?: boolean; msg?: string }>({ busy: false })
+  const run = async () => {
+    setState({ busy: true })
+    try {
+      await save()
+      const info = await checkCloud(provider)
+      const who = provider === 'aws'
+        ? `Signed in to AWS account ${info.account} as ${info.identity} (${info.region || 'no region set'})`
+        : `Signed in to Azure${info.subscription ? `, subscription ${info.subscription} readable` : ' (add a subscription ID to find resources)'}`
+      setState({ busy: false, ok: true, msg: who })
+    } catch (e) {
+      setState({ busy: false, ok: false, msg: e instanceof Error ? e.message : String(e) })
+    }
+  }
+  return (
+    <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+      <button type="button" onClick={run} disabled={state.busy} style={{
+        display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '8px 16px', borderRadius: '999px', fontSize: '13px',
+        border: '1px solid var(--border-strong)', background: 'rgba(255,255,255,0.05)', color: 'var(--text-primary)', cursor: 'pointer',
+      }}>
+        {state.busy ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> : <Cloud size={13} />} Save and test {provider === 'aws' ? 'AWS' : 'Azure'} sign-in
+      </button>
+      {state.msg && (
+        <span style={{ fontSize: '13px', color: state.ok ? 'var(--success)' : 'var(--danger)', lineHeight: 1.5 }}>
+          {state.ok ? '✓ ' : '✕ '}{state.msg}
+        </span>
+      )}
+    </div>
   )
 }
 
@@ -626,6 +662,53 @@ export default function SettingsPage() {
             These values pre-fill the Run Test form. You can override them per run.
           </p>
         </Section>
+
+        {/* ── Cloud monitoring (server metrics) ────────────────────── */}
+        <div id="cloud" style={{ scrollMarginTop: '96px' }}>
+        <Section icon={Cloud} title="Cloud Monitoring" description="Read server metrics from AWS CloudWatch and Azure Monitor into results analysis">
+          <p style={{ fontSize: '13px', color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: '18px' }}>
+            Read-only. Leave the keys empty to use this machine's own sign-in: an AWS CLI profile, SSO session or
+            instance role, and <code>az login</code> or a managed identity for Azure. Permissions needed: AWS —
+            CloudWatchReadOnlyAccess (plus ViewOnlyAccess to find resources); Azure — Monitoring Reader (plus Reader to find resources).
+          </p>
+
+          <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', margin: '4px 0 12px' }}>AWS</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
+            <Field label="Profile" help="From ~/.aws (blank: the default chain)">
+              <input type="text" value={form.aws_profile ?? ''} onChange={e => set('aws_profile', e.target.value)} placeholder="default" style={inputStyle} />
+            </Field>
+            <Field label="Region" help="Where your resources run">
+              <input type="text" value={form.aws_region ?? ''} onChange={e => set('aws_region', e.target.value)} placeholder="ap-south-1" style={inputStyle} />
+            </Field>
+          </div>
+          <Field label="Access key ID" help="Optional — only for a dedicated read-only IAM user">
+            <input type="text" value={form.aws_access_key_id ?? ''} onChange={e => set('aws_access_key_id', e.target.value)} placeholder="AKIA…" style={inputStyle} autoComplete="off" />
+          </Field>
+          <ApiKeyField label="Secret access key" value={form.aws_secret_access_key ?? ''} onChange={v => set('aws_secret_access_key', v)} placeholder="Only with an access key ID" />
+          <ApiKeyField label="Session token" value={form.aws_session_token ?? ''} onChange={v => set('aws_session_token', v)} placeholder="Optional — for temporary credentials" />
+          <CloudCheckButton provider="aws" save={() => updateSettings(form)} />
+
+          <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', margin: '24px 0 12px' }}>Azure</div>
+          <Field label="Subscription ID" help="Needed to find resources; metrics are read from each resource's own subscription">
+            <input type="text" value={form.azure_subscription_id ?? ''} onChange={e => set('azure_subscription_id', e.target.value)} placeholder="00000000-0000-0000-0000-000000000000" style={inputStyle} />
+          </Field>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
+            <Field label="Tenant ID" help="Optional — for a service principal">
+              <input type="text" value={form.azure_tenant_id ?? ''} onChange={e => set('azure_tenant_id', e.target.value)} style={inputStyle} />
+            </Field>
+            <Field label="Client ID" help="Optional — for a service principal">
+              <input type="text" value={form.azure_client_id ?? ''} onChange={e => set('azure_client_id', e.target.value)} style={inputStyle} />
+            </Field>
+          </div>
+          <ApiKeyField label="Client secret" value={form.azure_client_secret ?? ''} onChange={v => set('azure_client_secret', v)} placeholder="Only with a tenant and client ID" />
+          <CloudCheckButton provider="azure" save={() => updateSettings(form)} />
+
+          <label style={{ display: 'flex', gap: '10px', alignItems: 'center', marginTop: '22px', fontSize: '14px', color: 'var(--text-secondary)', cursor: 'pointer' }}>
+            <input type="checkbox" checked={(form.cloud_auto_fetch ?? 'true') !== 'false'} onChange={e => set('cloud_auto_fetch', e.target.checked ? 'true' : 'false')} />
+            Fetch server metrics automatically when a run is analysed (for scenarios that have resources chosen)
+          </label>
+        </Section>
+        </div>
 
         {/* ── Grafana / Metrics ────────────────────────────────────── */}
         <Section icon={Activity} title="Grafana Integration" description="Stream live test metrics to a Grafana dashboard via InfluxDB Backend Listener">

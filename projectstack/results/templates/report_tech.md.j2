@@ -61,6 +61,20 @@ Baseline run `{{ baseline.run_id }}`{% if baseline.tag %} ({{ baseline.tag }}){%
 {% endfor %}
 {% endif %}
 {% endif %}
+{% if server %}
+## Server metrics
+
+{% for r in server.resources if r.metrics %}
+**{{ r.name }}** ({{ r.type }}{% if r.role %}, {{ r.role }}{% endif %})
+
+| Metric | Steady-state average | Peak | Peak at |
+|---|---:|---:|---|
+{% for m in r.metrics %}
+| {{ m.label|md }} | {{ server_value(m.steady_avg, m.unit) }} | {{ server_value(m.max, m.unit) }} | {{ m.max_offset_s|offset }} |
+{% endfor %}
+
+{% endfor %}
+{% endif %}
 ## Timeline
 
 {% for o in n.timeline %}
@@ -172,6 +186,9 @@ Whole run, including ramp-up and ramp-down.
 ---
 
 - Steady state: {{ steady.get("note") or (steady.start_offset_s|offset ~ " to " ~ steady.end_offset_s|offset) }}.
+{% for w in doc.get("warnings") or [] %}
+- Data: {{ w }}.
+{% endfor %}
 {% for note in notes %}
 - {{ note }}
 {% endfor %}

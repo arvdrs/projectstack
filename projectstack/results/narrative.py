@@ -272,6 +272,8 @@ def _explain(f: dict[str, Any]) -> str:
     if t == "injector_connect":
         return ("Connection setup slowed down. This is often the load generator or the network (ephemeral ports, "
                 "DNS, TLS handshakes) rather than the application, so rule those out before blaming the server.")
+    if t == "server":
+        return _SERVER_MEANING.get(ev.get("pattern"), "A signal from the cloud monitoring of this resource.")
     if t == "correlation":
         return {
             "missing_value": "Requests went out with a placeholder instead of a real value, so the server got "
@@ -375,14 +377,84 @@ def _causes(doc: dict[str, Any]) -> list[dict[str, Any]]:
         groups["sla_only"] = [i for i, f in _numbered(doc) if f["type"] == "sla_breach"]
     out = [{"cause": _CAUSES[k][0], "confidence": _CAUSES[k][1], "findings": refs, "reasoning": _CAUSES[k][2],
             "how_to_confirm": _CAUSES[k][3]} for k, refs in groups.items()]
+    out = _server_causes(doc) + out
     out.sort(key=lambda c: CONFIDENCE.index(c["confidence"]))
     return out[:4]
+
+
+_SERVER_MEANING = {
+    "hot": "The server ran out of processor headroom. When CPU is this busy, requests wait for it, which shows up "
+           "as higher response times.",
+    "credits": "A burstable instance used up its CPU credits and is held to its baseline CPU until they rebuild.",
+    "memory": "Memory was nearly full, which leads to heavy garbage collection, swapping or failed allocations.",
+    "memory_growth": "Memory use kept rising at a steady load, the usual sign of a leak or an unbounded cache.",
+    "errors": "The infrastructure itself (load balancer, platform or database) reported errors, not only the test.",
+    "throttles": "The cloud service rejected calls above its concurrency limit.",
+    "evictions": "The cache was full and dropped data, sending more work to the database behind it.",
+    "queue": "Work waited in a queue on the server instead of being processed.",
+    "latency": "Latency rose inside this resource itself, so the slowdown starts there.",
+    "connections": "Connections stayed pinned at a ceiling, so new requests had to wait for one to free up.",
+    "scaling": "Autoscaling changed capacity during the run; compare statistics before and after with care.",
+    "health": "Part of the backend pool failed its health checks.",
+}
+
+_SERVER_CAUSE = {
+    # pattern: (cause, reasoning, how to confirm)
+    "hot": ("Processor capacity on {resource} ({rtype})", "{metric} stayed at 85% or more",
+            "Profile what uses the CPU there (slow queries, hot code paths, garbage collection); scale it up or out "
+            "and run the test again."),
+    "credits": ("CPU credits ran out on {resource}", "the burstable instance used up its credit balance",
+                "Use a non-burstable instance type (or unlimited mode) and run the test again."),
+    "memory": ("Memory pressure on {resource}", "memory in use stayed at 90% or more",
+               "Check heap and garbage-collection settings or cache sizing on it."),
+    "memory_growth": ("A possible memory leak on {resource}", "memory kept growing while the load stayed level",
+                      "Run a longer soak test and take heap dumps at the start and the end."),
+    "errors": ("{resource} failed requests", "it reported {metric}",
+               "Read the logs of {resource} for the time of the errors."),
+    "throttles": ("{resource} throttled requests", "calls above its concurrency limit were rejected",
+                  "Raise the concurrency limit or reserve capacity, then run the test again."),
+    "connections": ("A connection limit on {resource}", "{metric} stayed flat at their peak",
+                    "Compare the plateau with the configured pool size or max connections; raise it, or shorten "
+                    "how long each request holds a connection."),
+    "latency": ("Slower responses from {resource}", "its own {metric} stepped up",
+                "Look at what changed on {resource} at that time (queries, locks, background jobs)."),
+    "queue": ("Queuing on {resource}", "work waited in its queue", "Check what it was waiting for (disk, threads, CPU)."),
+    "evictions": ("Cache memory on {resource}", "it evicted keys", "Give the cache more memory or shorter TTLs."),
+}
+
+
+def _server_causes(doc: dict[str, Any]) -> list[dict[str, Any]]:
+    out, seen = [], set()
+    for i, f in _numbered(doc):
+        if f["type"] != "server" or f["severity"] not in ("critical", "warning"):
+            continue
+        ev = f.get("evidence") or {}
+        spec = _SERVER_CAUSE.get(ev.get("pattern"))
+        if not spec or (ev.get("pattern"), ev.get("resource")) in seen:
+            continue
+        seen.add((ev.get("pattern"), ev.get("resource")))
+        linked = ev.get("coincides_with") or []
+        fill = {"resource": ev.get("resource", "the resource"), "rtype": ev.get("resource_type", ""),
+                "metric": str(ev.get("metric", "")).lower() or "a metric"}
+        reasoning = spec[1].format(**fill)
+        reasoning = (reasoning[0].upper() + reasoning[1:]
+                     + (f" at the same time as: {linked[0][0].lower()}{linked[0][1:]}." if linked else "."))
+        out.append({"cause": spec[0].format(**fill), "confidence": "high" if linked else "medium", "findings": [i],
+                    "reasoning": reasoning, "how_to_confirm": spec[2].format(**fill)})
+    return out
 
 
 def _next_tests(doc: dict[str, Any]) -> list[dict[str, str]]:
     types = {f["type"] for f in doc.get("findings", [])}
     level = any(f["type"] == "latency_change" and _level_load(f.get("evidence", {})) for f in doc.get("findings", []))
     tests: list[dict[str, str]] = []
+    hot = [f for f in doc.get("findings", []) if f["type"] == "server" and f["severity"] in ("critical", "warning")
+           and (f.get("evidence") or {}).get("pattern") in ("hot", "credits", "connections")]
+    if hot:
+        res = hot[0]["evidence"].get("resource", "the busiest resource")
+        tests.append({"test": f"The same test after giving {res} more capacity (a larger size, more instances or a "
+                              "bigger connection pool)",
+                      "why": f"If the slowdown moves or disappears, {res} was the bottleneck."})
     if "saturation" in types:
         tests.append({"test": "A stepping test from half the saturation load up to just past it, with server "
                               "monitoring at every step",
@@ -562,6 +634,10 @@ def _plain(f: dict[str, Any]) -> str:
     if t == "saturation":
         return (f"The system stopped scaling at about {num(ev.get('knee_users'))} users: adding users no longer "
                 "increased the work done, it only made responses slower.")
+    if t == "server":
+        linked = ev.get("coincides_with") or []
+        tail = f", at the same time as: {linked[0][0].lower()}{linked[0][1:]}" if linked else ""
+        return f"On the servers: {f['title'][0].lower()}{f['title'][1:]}{tail}."
     if t == "correlation":
         return ("Part of the test did not behave like a real user: the script failed to carry a login token or "
                 "session along, so some results show errors that real users would not see. The script needs a fix "

@@ -1,0 +1,162 @@
+{% extends "report_base.html.j2" %}
+{% block title %}{{ run.scenario }} requests and transactions{% endblock %}
+{% block style %}
+.status { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13px; white-space: nowrap; }
+.status .badge-icon { width: 18px; height: 18px; font-size: 11px; }
+.status.critical .badge-icon { background: var(--critical); }
+.status.attention .badge-icon { background: var(--warning); color: #0b0b0b; }
+.status.healthy .badge-icon { background: var(--good); }
+.label-section { scroll-margin-top: 16px; }
+.label-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; margin-bottom: 4px; }
+.label-head h2 { margin: 0; font-size: 17px; overflow-wrap: anywhere; }
+.kind { color: var(--muted); font-size: 12.5px; text-transform: uppercase; letter-spacing: .06em; }
+ul.syn { margin: 10px 0 14px; padding-left: 20px; }
+ul.syn li { margin: 4px 0; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px 24px; margin-top: 12px; }
+.sparks { display: flex; flex-wrap: wrap; gap: 14px 28px; margin: 6px 0 4px; }
+.spark-k { font-size: 12px; color: var(--ink-2); margin-bottom: 2px; }
+.sp { display: block; overflow: visible; }
+.sp-line { fill: none; stroke: var(--series); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.sp-line-dot { fill: var(--series); }
+.sp-base { stroke: var(--axis); stroke-width: 1; }
+.bars { display: grid; grid-template-columns: max-content 1fr max-content; gap: 3px 10px; align-items: center; font-size: 12px; }
+.bars .bar { height: 10px; border-radius: 2px; background: var(--series); min-width: 1px; }
+.bars .rng { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.bars .cnt { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
+h3.sub { font-size: 13px; color: var(--ink-2); margin: 0 0 6px; }
+a.lbl { color: var(--ink); text-decoration: none; }
+a.lbl:hover { text-decoration: underline; }
+{% endblock %}
+{% macro status_badge(st) -%}
+{%- set m = {"critical": ("✕", "Needs action"), "attention": ("!", "Worth a look"), "healthy": ("✓", "Healthy"), "idle": ("–", "Idle")}[st] -%}
+<span class="status {{ st }}"><span class="badge-icon" aria-hidden="true">{{ m[0] }}</span>{{ m[1] }}</span>
+{%- endmacro %}
+{% block body %}
+<header>
+  <p class="eyebrow">Load test report · requests and transactions</p>
+  <h1>{{ run.scenario }}</h1>
+  <p class="meta">Run <code>{{ run.run_id }}</code>{% if run.tag %} · {{ run.tag }}{% endif %} · {{ run.start|day }} · {{ run.duration_s|duration }} · peak {{ run.peak_users|num }} users
+    · statistics over the steady state, {{ doc.steady.start_offset_s|offset }} to {{ doc.steady.end_offset_s|offset }}</p>
+</header>
+
+<section class="card">
+  <h2>Overview</h2>
+  <p class="small muted">{{ details|length }} of {{ total_labels|num }} labels: every transaction ({{ counts.transaction|num }}), then requests named in findings or SLA checks, then the busiest requests ({{ counts.request|num }} requests in all).</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Label</th><th>Kind</th><th>Status</th><th class="n">Samples</th><th class="n">p50</th><th class="n">p95</th><th class="n">p99</th><th class="n">Errors</th><th class="n">Share of time</th><th class="n">vs baseline</th></tr></thead>
+    <tbody>
+    {% for d in details %}
+      <tr>
+        <td class="label-cell"><a class="lbl" href="#l{{ loop.index }}">{{ d.label }}</a></td>
+        <td>{{ d.kind }}</td>
+        <td>{{ status_badge(d.status) }}</td>
+        <td class="n">{{ d.steady.samples|num }}</td>
+        <td class="n">{{ d.steady.p50_ms|num }}</td>
+        <td class="n">{{ d.steady.p95_ms|num }}</td>
+        <td class="n">{{ d.steady.p99_ms|num }}</td>
+        <td class="n">{{ d.steady.error_pct|pct }}</td>
+        <td class="n">{{ d.share_pct|pct }}</td>
+        <td class="n">{% if d.baseline and d.baseline.p95_change_pct is not none %}{{ "%+.0f"|format(d.baseline.p95_change_pct) }}% p95{% else %}—{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <p class="small muted">Times in ms. Share of time: this label's part of all response time of its kind in the steady state.</p>
+</section>
+
+{% for d in details %}
+<section class="card label-section" id="l{{ loop.index }}">
+  <div class="label-head">
+    <h2>{{ d.label }}</h2>
+    <span class="kind">{{ d.kind }}</span>
+    {{ status_badge(d.status) }}
+  </div>
+  <ul class="syn">{% for s in d.synthesis %}<li>{{ s }}</li>{% endfor %}</ul>
+
+  {% if d.spark %}
+  <div class="sparks">
+    <div><div class="spark-k">p95 response time</div>{{ d.spark.p95_ms }}</div>
+    <div><div class="spark-k">Requests per second</div>{{ d.spark.tps }}</div>
+    <div><div class="spark-k">Error rate</div>{{ d.spark.error_pct }}</div>
+  </div>
+  <p class="small muted">Whole run, {{ d.timeline.bucket_s }} s steps; hover a line for its range.</p>
+  {% endif %}
+
+  <div class="grid2">
+    <div>
+      <h3 class="sub">Statistics (ms)</h3>
+      <table>
+        <thead><tr><th></th><th class="n">Steady state</th><th class="n">Whole run</th>{% if d.baseline %}<th class="n">Baseline</th>{% endif %}</tr></thead>
+        <tbody>
+          {% for k, name in [("samples", "Samples"), ("avg_ms", "Average"), ("p50_ms", "p50"), ("p95_ms", "p95"), ("p99_ms", "p99"), ("max_ms", "Max"), ("error_pct", "Errors"), ("tps", "Per second")] %}
+          <tr><td>{{ name }}</td>
+            <td class="n">{{ d.steady[k]|pct if k == "error_pct" else (d.steady[k]|num(2) if k == "tps" else d.steady[k]|num) }}</td>
+            <td class="n">{{ d.whole_run[k]|pct if k == "error_pct" else (d.whole_run[k]|num(2) if k == "tps" else d.whole_run[k]|num) }}</td>
+            {% if d.baseline %}<td class="n">{% if d.baseline[k] is defined and d.baseline[k] is not none %}{{ d.baseline[k]|pct if k == "error_pct" else (d.baseline[k]|num(2) if k == "tps" else d.baseline[k]|num) }}{% else %}—{% endif %}</td>{% endif %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div>
+      <h3 class="sub">Percentiles (steady state)</h3>
+      <table><tbody>{% for x in d.ladder %}<tr><td>p{{ "%g"|format(x.p * 100) }}</td><td class="n">{{ x.ms|num }} ms</td></tr>{% endfor %}</tbody></table>
+      {% if d.breakdown %}
+      <h3 class="sub" style="margin-top:14px">Where the time goes (average)</h3>
+      <table><tbody>
+        <tr><td>Connecting</td><td class="n">{{ d.breakdown.connect_ms|num(1) }} ms</td></tr>
+        <tr><td>Waiting for the server</td><td class="n">{{ d.breakdown.server_ms|num(1) }} ms</td></tr>
+        <tr><td>Downloading</td><td class="n">{{ d.breakdown.download_ms|num(1) }} ms</td></tr>
+        <tr><td>Response size</td><td class="n">{{ d.breakdown.bytes|kib }}</td></tr>
+      </tbody></table>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if d.histogram.bins %}
+  {% set hmax = d.histogram.bins|map(attribute="samples")|max %}
+  <h3 class="sub" style="margin-top:16px">Distribution of response times (steady state)</h3>
+  <div class="bars">
+    {% for b in d.histogram.bins %}
+      <span class="rng">{{ b.from_ms|num }}–{{ b.to_ms|num }} ms</span>
+      <span><span class="bar" style="display:block;width:{{ (b.samples / hmax * 100) if hmax else 0 }}%"></span></span>
+      <span class="cnt">{{ b.samples|num }}</span>
+    {% endfor %}
+    {% if d.histogram.overflow %}<span class="rng">over {{ (d.histogram.bins[-1].to_ms)|num }} ms</span><span></span><span class="cnt">{{ d.histogram.overflow|num }}</span>{% endif %}
+  </div>
+  {% endif %}
+
+  <div class="grid2">
+    {% if d.codes %}
+    <div>
+      <h3 class="sub">Response codes (whole run)</h3>
+      <table><thead><tr><th>Code</th><th class="n">Samples</th><th class="n">Share</th><th class="n">Failed</th></tr></thead>
+        <tbody>{% for c in d.codes %}<tr><td>{{ c.code }}</td><td class="n">{{ c.samples|num }}</td><td class="n">{{ c.share_pct|pct }}</td><td class="n">{{ c.failed|num }}</td></tr>{% endfor %}</tbody></table>
+    </div>
+    {% endif %}
+    {% if d.errors %}
+    <div>
+      <h3 class="sub">Errors (whole run)</h3>
+      <table><thead><tr><th>Code</th><th>Message</th><th class="n">Count</th><th>First</th></tr></thead>
+        <tbody>{% for e in d.errors %}<tr><td>{{ e.code }}</td><td class="label-cell">{{ e.message }}</td><td class="n">{{ e.count|num }}</td><td>{{ e.first_offset_s|offset }}</td></tr>{% endfor %}</tbody></table>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if d.slowest %}
+  <details>
+    <summary>Slowest samples in the steady state</summary>
+    <div class="scroll"><table>
+      <thead><tr><th>Time</th><th class="n">Elapsed</th><th class="n">First byte</th><th>Code</th><th>Result</th><th>Thread</th></tr></thead>
+      <tbody>{% for x in d.slowest %}<tr><td>{{ x.t_offset_s|offset }}</td><td class="n">{{ x.elapsed_ms|num }} ms</td><td class="n">{{ x.latency_ms|num }} ms</td><td>{{ x.code }}</td><td>{{ "✓ OK" if x.success else "✕ Failed" }}</td><td class="label-cell">{{ x.thread }}</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </details>
+  {% endif %}
+</section>
+{% endfor %}
+
+<footer>
+  <p>Statuses are rule-based: “Needs action” for a missed SLA, a critical finding or at least 5% errors; “Worth a look” for 1% errors or more, a long response-time tail, a slowdown during the steady state or a warning finding.</p>
+  <p>Generated by ProjectStack · {{ generated_at }} · nothing in this report was written by AI</p>
+</footer>
+{% endblock %}

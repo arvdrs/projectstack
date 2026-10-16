@@ -158,6 +158,13 @@ def _env():
     return env
 
 
+def _server_value(v: Any, unit: str) -> str:
+    if v is None:
+        return "—"
+    from projectstack.results.cloud.analysis import _fmt
+    return _fmt(float(v), unit)
+
+
 def _md_cell(text: Any) -> str:
     return str(text if text is not None else "").replace("|", "\\|").replace("\n", " ")
 
@@ -232,6 +239,8 @@ def context(doc: dict, narrative: Narrative, audience: str) -> dict[str, Any]:
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
         "timeline_rows": chart.series(doc),
         "baseline": doc.get("baseline"),
+        "server": doc.get("server"),
+        "server_value": _server_value,
         "regressions": [f for f in findings if f["type"] == "regression"],
     }
 

@@ -388,6 +388,30 @@ _CH_OPTION = click.option(
 )
 
 
+def _auto_server_metrics(result, log):
+    """Fetch the scenario's saved cloud resources for a new run (never fails the analysis)."""
+    import json as _json
+    from projectstack.config import load_settings
+    from projectstack.results.cloud import CloudError, load_targets
+    from projectstack.results.cloud.analysis import fetch_and_attach
+    from projectstack.results.db import connect
+    settings = load_settings()
+    if str(settings.get("cloud_auto_fetch", "true")).lower() not in ("1", "true", "yes"):
+        return
+    resources = load_targets(settings, result.meta.get("scenario", ""))
+    if not resources:
+        return
+    log(f"Fetching server metrics for {len(resources)} cloud resource(s) …")
+    try:
+        info = fetch_and_attach(connect(settings), result.folder, settings, resources)
+        result.findings = _json.loads((result.folder / "findings.json").read_text())
+        log(f"Server metrics: {info['series']} series, {info['findings']} finding(s)")
+    except CloudError as exc:
+        log(f"Server metrics not fetched: {exc}")
+    except Exception as exc:  # noqa: BLE001
+        log(f"Server metrics not fetched: {type(exc).__name__}: {exc}")
+
+
 class _AnalyzeCommand(click.Command):
     """With --ci, command-line mistakes exit with 4 (analysis error) instead of click's 2 (a regression in CI)."""
 
@@ -459,6 +483,8 @@ def analyze(jtl_file, steady, sla, tag, scenario, props, stats, max_bad_rows, ba
         if not ci:
             raise
         fail(f"{type(exc).__name__}: {exc}")
+
+    _auto_server_metrics(result, log)
 
     if as_json and not ci:
         click.echo(_json.dumps({"run_id": result.run_id, "meta": result.meta, "metrics": result.metrics,
@@ -698,6 +724,64 @@ def report(run_ref, audience, formats, no_llm, provider_spec, strict_numbers, fr
 
 @cli.command()
 @click.argument("run_ref")
+@click.argument("label", required=False)
+@click.option("--limit", default=40, show_default=True, help="Most labels in the report (all transactions are always in).")
+@click.option("--format", "formats", type=click.Choice(["html", "md", "both"]), default="html", show_default=True)
+@click.option("--out", default=None, metavar="PATH", help="File or folder to write to (default: the run's folder).")
+@_CH_OPTION
+def labels(run_ref, label, limit, formats, out, clickhouse_url):
+    """Synthesis report per request and transaction (RUN_REF: run id or unique prefix).
+
+    With LABEL, prints that request or transaction's synthesis instead of writing the report.
+    """
+    from projectstack.config import load_settings
+    from projectstack.results import labels as labels_mod
+    from projectstack.results import store
+
+    database = _results_db(clickhouse_url)
+    try:
+        run_id = store.resolve_run(database, run_ref)
+    except LookupError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(2)
+    folder = Path(load_settings()["runs_dir"]) / run_id
+    if not (folder / "findings.json").exists():
+        click.echo(f"Error: findings.json for {run_id} is missing from {folder}", err=True)
+        raise SystemExit(2)
+    if label:
+        import json as _json
+        doc = _json.loads((folder / "findings.json").read_text())
+        base_metrics, base_info = labels_mod.load_baseline(doc, folder.parent, database)
+        try:
+            d = labels_mod.detail(database, run_id, label, doc, base_metrics, base_info)
+        except LookupError as exc:
+            click.echo(f"Error: {exc}", err=True)
+            raise SystemExit(2)
+        marks = {"critical": "✖ needs action", "attention": "▲ worth a look", "healthy": "✓ healthy", "idle": "– idle"}
+        click.echo(f"{d['label']}  ({d['kind']}) — {marks[d['status']]}")
+        for line in d["synthesis"]:
+            click.echo(f"  • {line}")
+        st = d["steady"]
+        click.echo(f"  steady state: {st['samples']:,} samples · avg {st['avg_ms']:,.0f} · p50 {st['p50_ms']:,} · "
+                   f"p95 {st['p95_ms']:,} · p99 {st['p99_ms']:,} · max {st['max_ms']:,} ms · errors {st['error_pct']:.2f}%")
+        return
+    chosen = ("html", "md") if formats == "both" else (formats,)
+    for fmt in chosen:
+        text, details = labels_mod.build_report(database, folder, None, limit, fmt)
+        target = Path(out) if out else folder / f"report_labels.{fmt}"
+        if out and (target.is_dir() or out.endswith("/")):
+            target = target / f"report_labels.{fmt}"
+        elif out and len(chosen) > 1:
+            target = target.with_suffix(f".{fmt}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+        click.echo(str(target))
+    click.echo(f"{len(details)} labels: " + ", ".join(f"{sum(1 for d in details if d['status'] == k)} {k}"
+                                                     for k in ("critical", "attention", "healthy", "idle")), err=True)
+
+
+@cli.command()
+@click.argument("run_ref")
 @click.argument("question")
 @click.option("--provider", "provider_spec", default=None, metavar="NAME[/MODEL]",
               help="AI provider, e.g. claude or gemini (default: the 'ask' task setting).")
@@ -805,6 +889,114 @@ def health(run_ref, jmx, as_json, clickhouse_url):
             for x in m["extractors"]:
                 err = f", which failed {x['source_error_pct']:g}%" if x.get("source_error_pct") else ""
                 click.echo(f"    {m['var']} ← {x['description']}{err}")
+
+
+def _parse_resource(spec: str):
+    """provider:type:id[:name[:role]] — e.g. aws:rds:orders-db:Orders DB:database"""
+    from projectstack.results.cloud import Resource
+    parts = spec.split(":", 4) if not spec.startswith("azure:") else None
+    if spec.startswith("azure:"):
+        # Azure ids contain slashes but no colons: azure:<type>:<resource id>[:name[:role]]
+        provider, rtype, rest = spec.split(":", 2)
+        rid, _, tail = rest.partition(":")
+        name, _, role = tail.partition(":")
+        parts = [provider, rtype, rid, name, role]
+    parts = (parts or []) + [""] * (5 - len(parts or []))
+    return Resource.from_dict(dict(zip(("provider", "type", "id", "name", "role"), parts)))
+
+
+@cli.group()
+def cloud():
+    """Server metrics from AWS CloudWatch and Azure Monitor (read-only)."""
+
+
+@cloud.command("check")
+@click.option("--provider", type=click.Choice(["aws", "azure", "all"]), default="all", show_default=True)
+def cloud_check(provider):
+    """Sign in to the cloud and show as whom."""
+    from projectstack.config import load_settings
+    from projectstack.results.cloud import CloudError, get_provider
+    settings, failed = load_settings(), False
+    for name in (("aws", "azure") if provider == "all" else (provider,)):
+        try:
+            info = get_provider(name, settings).check()
+            click.echo(f"{name}: " + ", ".join(f"{k} {v}" for k, v in info.items() if k != "provider" and v))
+        except CloudError as exc:
+            failed = True
+            click.echo(f"{name}: {exc}", err=True)
+    raise SystemExit(1 if failed and provider != "all" else 0)
+
+
+@cloud.command("discover")
+@click.option("--provider", type=click.Choice(["aws", "azure"]), required=True)
+@click.option("--type", "types", multiple=True, help="Resource type (repeat): ec2, ecs, rds, alb … / vm, aks, sqldb, appgw …")
+@click.option("--region", default="", help="AWS region (default: Settings / profile) or Azure location filter.")
+def cloud_discover(provider, types, region):
+    """List resources that can be monitored, as specs for `pstack cloud targets --add`."""
+    from projectstack.config import load_settings
+    from projectstack.results.cloud import CloudError, get_provider
+    try:
+        found, warnings = get_provider(provider, load_settings()).discover(list(types) or None, region)
+    except CloudError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(2)
+    for r in found:
+        click.echo(f"{r.provider}:{r.type}:{r.id}:{r.name}" + (f"   ({r.region})" if r.region else ""))
+    for w in warnings:
+        click.echo(f"Warning: {w}", err=True)
+    click.echo(f"{len(found)} resource(s)", err=True)
+
+
+@cloud.command("targets")
+@click.argument("scenario")
+@click.option("--add", "add", multiple=True, metavar="SPEC", help="provider:type:id[:name[:role]] (repeat).")
+@click.option("--clear", is_flag=True, help="Forget the scenario's resources first.")
+def cloud_targets(scenario, add, clear):
+    """Show or set the cloud resources whose metrics are fetched for a scenario's runs."""
+    from projectstack.config import load_settings
+    from projectstack.results.cloud import CloudError, load_targets, save_targets
+    settings = load_settings()
+    current = [] if clear else list(load_targets(settings, scenario))
+    try:
+        for spec in add:
+            r = _parse_resource(spec)
+            current = [c for c in current if not (c.provider == r.provider and c.id == r.id)] + [r]
+    except (CloudError, KeyError, ValueError) as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(2)
+    if add or clear:
+        save_targets(settings, scenario, current)
+    for r in current:
+        click.echo(f"{r.provider}:{r.type}:{r.id}:{r.name}:{r.role}".rstrip(":"))
+    if not current:
+        click.echo(f"No cloud resources saved for {scenario!r}", err=True)
+
+
+@cli.command("server-metrics")
+@click.argument("run_ref")
+@click.option("--resource", "specs", multiple=True, metavar="SPEC",
+              help="provider:type:id[:name[:role]] (default: the resources saved for the run's scenario).")
+@_CH_OPTION
+def server_metrics(run_ref, specs, clickhouse_url):
+    """Fetch AWS / Azure server metrics for a run's window and add them to its analysis."""
+    from projectstack.config import load_settings
+    from projectstack.results import store
+    from projectstack.results.cloud import CloudError
+    from projectstack.results.cloud.analysis import fetch_and_attach
+    database = _results_db(clickhouse_url)
+    settings = load_settings()
+    try:
+        run_id = store.resolve_run(database, run_ref)
+        resources = [_parse_resource(s) for s in specs] or None
+        info = fetch_and_attach(database, Path(settings["runs_dir"]) / run_id, settings, resources)
+    except (LookupError, CloudError, KeyError, ValueError) as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(2)
+    click.echo(f"{run_id}: {info['series']} metric series, {info['findings']} server finding(s), verdict {info['verdict']}")
+    for m in info["missing"][:10]:
+        click.echo(f"  no data: {m['resource']} {m['metric']} — {m['why']}", err=True)
+    for w in info["warnings"]:
+        click.echo(f"  warning: {w}", err=True)
 
 
 @cli.group()
