@@ -1,0 +1,22 @@
+<!--
+  ClickHouse settings for the Docker setup (docker-compose.yml). ProjectStack does not read
+  ClickHouse's own logs, so they are kept small: by default the server log grows to 10 GB and
+  its diagnostic tables are never trimmed, which fills a laptop's disk over a few months.
+-->
+<clickhouse>
+    <logger>
+        <level>warning</level>
+        <size>100M</size>
+        <count>3</count>
+    </logger>
+    <text_log>
+        <level>warning</level>
+        <ttl>event_date + INTERVAL 7 DAY DELETE</ttl>
+    </text_log>
+    <query_log><ttl>event_date + INTERVAL 30 DAY DELETE</ttl></query_log>
+    <part_log><ttl>event_date + INTERVAL 7 DAY DELETE</ttl></part_log>
+    <trace_log><ttl>event_date + INTERVAL 7 DAY DELETE</ttl></trace_log>
+    <metric_log><ttl>event_date + INTERVAL 7 DAY DELETE</ttl></metric_log>
+    <asynchronous_metric_log><ttl>event_date + INTERVAL 7 DAY DELETE</ttl></asynchronous_metric_log>
+    <processors_profile_log><ttl>event_date + INTERVAL 7 DAY DELETE</ttl></processors_profile_log>
+</clickhouse>

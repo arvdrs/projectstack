@@ -1,0 +1,44 @@
+# Jars added to JMeter 5.6 in the Docker image: the same files as the JMeter install
+# ProjectStack is used with, byte for byte. The build checks each SHA-256 and stops on a mismatch.
+#
+# To add a plugin for everyone: add its jar (and the jars it needs) here, then
+#   docker compose up -d --build
+#
+# folder      sha256                                                            url
+
+# Custom Thread Groups (Stepping, Ultimate, Concurrency, Arrivals), with the common library
+lib/ext  2a6bace601770a6932c691f7c1c9fd90b0925bfdaa7feb3dffac9cd86730bc4b  https://repo1.maven.org/maven2/kg/apc/jmeter-plugins-casutg/3.1.1/jmeter-plugins-casutg-3.1.1.jar
+lib/ext  98124a4ea7c68f099835a00d91ce84b3d0e537d88dd4ca63ba8af704193bf3e6  https://repo1.maven.org/maven2/kg/apc/jmeter-plugins-cmn-jmeter/0.7/jmeter-plugins-cmn-jmeter-0.7.jar
+lib      98124a4ea7c68f099835a00d91ce84b3d0e537d88dd4ca63ba8af704193bf3e6  https://repo1.maven.org/maven2/kg/apc/jmeter-plugins-cmn-jmeter/0.7/jmeter-plugins-cmn-jmeter-0.7.jar
+
+# Dummy Sampler
+lib/ext  a0e75fe56cd571a5ac35a7691962104d296907858046e0f1dfff5c679f05fa8b  https://repo1.maven.org/maven2/kg/apc/jmeter-plugins-dummy/0.4/jmeter-plugins-dummy-0.4.jar
+
+# Plugins Manager
+lib/ext  bc0551fca04ed3d8b57794c93c815101a93ac0c3849dae3f3241ae290da06aec  https://repo1.maven.org/maven2/kg/apc/jmeter-plugins-manager/1.12/jmeter-plugins-manager-1.12.jar
+lib      f7674154e38428e6bab0261c7dc8af1b9c59f241df4d58a077462432b8fac64e  https://repo1.maven.org/maven2/kg/apc/cmdrunner/2.3/cmdrunner-2.3.jar
+
+# WebSocket Samplers by Peter Doornbosch
+lib/ext  f9818f27fbbfe871bc2fb191215970928a475a586c640c7bb29bf76a9d7ced3f  https://repo1.maven.org/maven2/net/luminis/jmeter/jmeter-websocket-samplers/1.3.2/jmeter-websocket-samplers-1.3.2.jar
+
+# WebSocket Sampler by Maciej Zaleski, with the Jetty 9.1 client it needs
+lib/ext  9c3682bb8b417971cb283541bc89fea785b27f329223cd7d11b7dc1cd6857e37  https://jmeter-plugins.org/files/thirdparty/JMeterWebSocketSampler-1.0.2-SNAPSHOT.jar
+lib      cf94ddd85f7b6c51a0148e859eae4c152cf020af5cafc0bdeef159c1211cfdb9  https://repo1.maven.org/maven2/org/eclipse/jetty/jetty-http/9.1.1.v20140108/jetty-http-9.1.1.v20140108.jar
+lib      e50517303947f1fe2054d6a29fa0e169c309bb1b833315b89a5c109e33ab9ce2  https://repo1.maven.org/maven2/org/eclipse/jetty/jetty-io/9.1.1.v20140108/jetty-io-9.1.1.v20140108.jar
+lib      b644407b44a022dc939f4d8e97f9e470da2303baaa82e44578b2c63c43393b1c  https://repo1.maven.org/maven2/org/eclipse/jetty/jetty-util/9.1.1.v20140108/jetty-util-9.1.1.v20140108.jar
+lib      312f1c0578dda21abf1c401707ad0061e65d7f826e3a93253ee9ccc212807792  https://repo1.maven.org/maven2/org/eclipse/jetty/websocket/websocket-api/9.1.1.v20140108/websocket-api-9.1.1.v20140108.jar
+lib      40ddf949c1bee51a099d34e2d09824e01a82ecc0b6e08341c2147d3161b24b62  https://repo1.maven.org/maven2/org/eclipse/jetty/websocket/websocket-client/9.1.1.v20140108/websocket-client-9.1.1.v20140108.jar
+lib      60b25f28766c6b8367cbe1b98b3b176a4a14bf9bb0a5527ac4e73232a32c3c4c  https://repo1.maven.org/maven2/org/eclipse/jetty/websocket/websocket-common/9.1.1.v20140108/websocket-common-9.1.1.v20140108.jar
+
+# Apache POI 5.2.3 (read and write Excel files from JSR223 scripts)
+lib      1d4c81a283e127693db89e85df45119d9d312d5686d2439b5be9445c2c649155  https://repo1.maven.org/maven2/org/apache/poi/poi/5.2.3/poi-5.2.3.jar
+lib      9b8ff6ecf562836299ce15997796e3d47fe063a5956c1c7d3f6e2a4bf6e60b79  https://repo1.maven.org/maven2/org/apache/poi/poi-ooxml/5.2.3/poi-ooxml-5.2.3.jar
+lib      0484b712eb63a8872723cafb88004be60f47187baccacddaee12712a1ad2e7b5  https://repo1.maven.org/maven2/org/apache/poi/poi-ooxml-full/5.2.3/poi-ooxml-full-5.2.3.jar
+lib      5f484a78bed71cbffe3709678b6bdd3463781a7c61c6d9872330aecbf150762a  https://repo1.maven.org/maven2/org/apache/xmlbeans/xmlbeans/5.1.1/xmlbeans-5.1.1.jar
+lib      6aecfd5459728a595601cfa07258d131972ffc39b492eb48bdd596577a2f244a  https://repo1.maven.org/maven2/org/apache/commons/commons-compress/1.21/commons-compress-1.21.jar
+lib      b31539cdcf189d9e68a1f6998cba09ea912f99f5f24bcd0650212b1af9d355a2  https://repo1.maven.org/maven2/com/github/virtuald/curvesapi/1.07/curvesapi-1.07.jar
+
+# Other libraries in the reference install
+lib      8290f8871ebd3db52e36c6fa844fe172895b2c714ea589cfed3d78ad9c01a924  https://repo1.maven.org/maven2/net/sf/json-lib/json-lib/2.4/json-lib-2.4-jdk15.jar
+lib      b9e24b7dd6e07495562ea96531be3130c96dba4d78e1dfd88adbbdebf4332871  https://repo1.maven.org/maven2/com/sun/activation/jakarta.activation/2.0.1/jakarta.activation-2.0.1.jar
+lib      b8fb4bee3ff5b5c1ef77144d8411316018d7bbd41fcf1ede0646f7978546b867  https://repo1.maven.org/maven2/jakarta/xml/bind/jakarta.xml.bind-api/3.0.1/jakarta.xml.bind-api-3.0.1.jar

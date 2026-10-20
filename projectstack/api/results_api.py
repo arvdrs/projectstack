@@ -25,12 +25,13 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
-from projectstack.config import load_settings
+from projectstack.config import IN_DOCKER, load_settings
 
 router = APIRouter(prefix="/api/results", tags=["results"])
 
 UPLOAD_DIR = Path.home() / ".projectstack" / "uploads"
-CLICKHOUSE_HINT = "docker compose -f deploy/clickhouse/docker-compose.yml up -d"
+CLICKHOUSE_HINT = ("docker compose up -d clickhouse" if IN_DOCKER
+                   else "docker compose -f deploy/clickhouse/docker-compose.yml up -d")
 
 
 # ---------------------------------------------------------------------------

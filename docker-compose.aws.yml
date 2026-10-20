@@ -1,0 +1,16 @@
+# Optional: let Server metrics use your computer's AWS CLI sign-in (profiles, `aws sso login`)
+# instead of keys in Settings. Pass both files every time you start ProjectStack:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.aws.yml up -d
+#
+# Read-write so an SSO token can be refreshed, as the AWS CLI does. Sign in with the AWS CLI
+# first: the folder must exist (Docker would otherwise create an empty one owned by root).
+services:
+  app:
+    volumes:
+      - type: bind
+        # Your home folder: Docker installed as a snap sees $HOME as ~/snap/docker/…, Windows has no $HOME
+        source: ${SNAP_REAL_HOME:-${HOME:-${USERPROFILE}}}/.aws
+        target: /data/.aws
+        bind:
+          create_host_path: false

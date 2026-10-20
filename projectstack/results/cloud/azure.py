@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from projectstack.config import IN_DOCKER
 from projectstack.results.cloud import CloudError, FetchResult, Resource, Series
 from projectstack.results.cloud.presets import AZURE, MetricDef
 
@@ -73,6 +74,9 @@ class AzureMonitor:
         from azure.core.exceptions import ClientAuthenticationError, HttpResponseError, ResourceNotFoundError
         if isinstance(exc, ClientAuthenticationError):
             first = str(exc).strip().splitlines()[0][:300]
+            if IN_DOCKER:
+                return CloudError("Azure sign-in failed — ProjectStack is running in Docker, where `az login` is not available: "
+                                  f"add a service principal in Settings ({first})")
             return CloudError(f"Azure sign-in failed — run `az login` on this machine or add a service principal in Settings ({first})")
         if isinstance(exc, ResourceNotFoundError):
             return CloudError(f"Azure could not find the resource during {what}")

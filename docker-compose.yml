@@ -1,0 +1,56 @@
+# ProjectStack with Docker: the web app (with JMeter and the CLI) and the ClickHouse it stores
+# results in. From this folder:
+#
+#   docker compose up -d --build        then open http://localhost:6292
+#
+# Settings that differ per person go in a .env file next to this one (README → Run with Docker).
+name: projectstack
+
+services:
+  app:
+    build: .
+    image: projectstack:latest
+    init: true                         # reaps JMeter and recorder processes
+    restart: unless-stopped
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    ports:
+      # Only this computer can open them: the app has no login and keeps your API keys
+      - "127.0.0.1:${PSTACK_PORT:-6292}:6292"    # web app and API
+      - "127.0.0.1:8082:8082"                    # proxy recorder
+    environment:
+      TZ: ${TZ:-Asia/Kolkata}                    # times in run summaries and JMeter's dashboard
+      HEAP: ${JMETER_HEAP:-}                     # empty: JMeter's -Xms1g -Xmx8g
+      PSTACK_CLICKHOUSE_HOST: clickhouse
+      PSTACK_CLICKHOUSE_URL: ${PSTACK_CLICKHOUSE_URL:-}   # set to use a team ClickHouse instead
+      PSTACK_DEFAULT_OLLAMA_URL: http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"     # your computer, as seen from the container (Linux too)
+    volumes:
+      - data:/data                               # settings, sessions, reports, uploads
+      - ./workspace:/workspace                   # files for the CLI
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.8
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: projectstack
+      CLICKHOUSE_USER: projectstack
+      CLICKHOUSE_PASSWORD: projectstack          # reachable only from the app container
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./deploy/docker/clickhouse.xml:/etc/clickhouse-server/config.d/projectstack.xml:ro
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8123/ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
+volumes:
+  data:
+  clickhouse-data:

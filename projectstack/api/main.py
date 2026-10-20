@@ -125,7 +125,7 @@ def _load_session_from_disk(session_id: str) -> dict[str, Any] | None:
         return None
 
 from projectstack.config import (  # noqa: E402
-    DEFAULT_SETTINGS, SECRET_FIELDS as _SECRET_FIELDS, load_settings, save_settings,
+    DEFAULT_SETTINGS, IN_DOCKER, SECRET_FIELDS as _SECRET_FIELDS, load_settings, save_settings,
 )
 
 _settings: dict[str, str] = dict(DEFAULT_SETTINGS)
@@ -607,6 +607,13 @@ _CHROMIUM_BINS = [
 ]
 
 
+def _proxy_port_open() -> bool:
+    import socket
+    with socket.socket() as s:
+        s.settimeout(0.5)
+        return s.connect_ex(("127.0.0.1", _PROXY_PORT)) == 0
+
+
 def _find_chromium() -> Optional[str]:
     """Return the first Chromium/Chrome binary found on PATH, or None."""
     import shutil
@@ -721,6 +728,9 @@ async def proxy_start(body: Optional[ProxyStartRequest] = None):
     if not Path(mitmdump_bin).exists():
         mitmdump_bin = "mitmdump"  # fall back to PATH
 
+    if _proxy_port_open():
+        return {"ok": False, "error": f"Port {_PROXY_PORT} is already in use by another program — close it and start recording again"}
+
     try:
         proc = subprocess.Popen(
             [
@@ -734,12 +744,19 @@ async def proxy_start(body: Optional[ProxyStartRequest] = None):
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        await asyncio.sleep(1.0)   # give mitmdump time to bind
-        if proc.poll() is not None:
-            return {
-                "ok": False,
-                "error": "mitmdump exited immediately — is mitmproxy installed? (pip install mitmproxy)",
-            }
+        # Wait until it listens: about a second, longer on a slow machine or on its first start,
+        # when it creates its certificate authority
+        deadline = time.monotonic() + 20
+        while not _proxy_port_open():
+            if proc.poll() is not None:
+                return {
+                    "ok": False,
+                    "error": "mitmdump exited immediately — is mitmproxy installed? (pip install mitmproxy)",
+                }
+            if time.monotonic() > deadline:
+                proc.terminate()
+                return {"ok": False, "error": f"The recorder did not start listening on port {_PROXY_PORT}"}
+            await asyncio.sleep(0.1)
         _proxy_proc = proc
 
         # Launch Chromium pre-configured to use the proxy.
@@ -780,6 +797,7 @@ async def proxy_start(body: Optional[ProxyStartRequest] = None):
             "chromium_launched": chromium_launched,
             "chromium_bin": chromium_bin,
             "cert_trusted": cert_trusted,
+            "in_docker": IN_DOCKER,   # no browser can be opened from the container: the UI shows a command instead
         }
     except FileNotFoundError:
         return {
@@ -902,6 +920,7 @@ async def proxy_status():
         # [{name, request_count}] in recording order, including transactions with no requests yet
         "transactions": _merge_transaction_counts(markers, status.get("transactions", [])),
         "browser_open": bool(_chromium_proc and _chromium_proc.poll() is None),
+        "in_docker": IN_DOCKER,
     }
 
 
@@ -1571,11 +1590,28 @@ async def generate(session_id: str, body: GenerateRequest):
     }
 
 
+def _session_jmx(session: dict) -> Optional[str]:
+    """
+    The session's generated JMX on disk. It is written to the temp folder, which a reboot
+    (or, in Docker, updating the container) empties; the session keeps the text, so the file
+    is written again rather than asking for the script to be generated again.
+    """
+    path = session.get("jmx_path")
+    if path and Path(path).exists():
+        return path
+    if not session.get("jmx_content"):
+        return None
+    with tempfile.NamedTemporaryFile(suffix=".jmx", delete=False, mode="w", encoding="utf-8") as tmp:
+        tmp.write(session["jmx_content"])
+    session["jmx_path"] = tmp.name
+    return tmp.name
+
+
 @app.get("/api/download/{session_id}")
 async def download_jmx(session_id: str):
     session = _get_session(session_id)
-    jmx_path = session.get("jmx_path")
-    if not jmx_path or not Path(jmx_path).exists():
+    jmx_path = _session_jmx(session)
+    if not jmx_path:
         raise HTTPException(status_code=404, detail="JMX not yet generated for this session")
     filename = f"{session.get('filename', 'test').replace('.har', '')}_test.jmx"
     return FileResponse(
@@ -1589,8 +1625,8 @@ async def download_jmx(session_id: str):
 @app.post("/api/run/{session_id}")
 async def run_test(session_id: str, body: RunRequest):
     session = _get_session(session_id)
-    jmx_path = session.get("jmx_path")
-    if not jmx_path or not Path(jmx_path).exists():
+    jmx_path = _session_jmx(session)
+    if not jmx_path:
         raise HTTPException(status_code=400, detail="Generate JMX first before running")
 
     try:
@@ -1751,7 +1787,7 @@ async def analyze_session_run(session_id: str, body: AnalyzeRunRequest):
     await asyncio.to_thread(shutil.copyfile, jtl, copy)
     test_name = _report_meta(session, session_id, {})["test_name"]
     sla = ((session.get("results") or {}).get("sla") or {}).get("config")
-    jmx = session.get("jmx_path") if session.get("jmx_path") and Path(session["jmx_path"]).exists() else None
+    jmx = _session_jmx(session)
     job = start_job(copy, source=f"{test_name} (test run)", scenario=test_name, tag=body.tag or "app run",
                     sla=sla, baseline=body.baseline or None, jmx=jmx, session_id=session_id)
     job.log(f"Analysing the results of the last run of {test_name}")
@@ -2889,5 +2925,27 @@ async def raw_convert(
 _static = Path(__file__).parent.parent / "ui-web" / "dist"
 if _static.exists():
     from fastapi.staticfiles import StaticFiles
+    from starlette.exceptions import HTTPException as StarletteHTTPException
 
-    app.mount("/", StaticFiles(directory=str(_static), html=True), name="static")
+    class _AppFiles(StaticFiles):
+        """
+        The built UI. A page path that is not a file (/results/run/…) gets index.html, so
+        reloads and shared links work; index.html is revalidated so an update shows at once.
+        """
+
+        async def get_response(self, path: str, scope):
+            try:
+                return await super().get_response(path, scope)
+            except StarletteHTTPException as exc:
+                last = path.rsplit("/", 1)[-1]
+                if exc.status_code != 404 or path.split("/", 1)[0] == "api" or "." in last:
+                    raise
+                return await super().get_response("index.html", scope)
+
+        def file_response(self, full_path, stat_result, scope, status_code=200):
+            response = super().file_response(full_path, stat_result, scope, status_code)
+            if str(full_path).endswith(".html"):
+                response.headers["Cache-Control"] = "no-cache"
+            return response
+
+    app.mount("/", _AppFiles(directory=str(_static), html=True), name="static")

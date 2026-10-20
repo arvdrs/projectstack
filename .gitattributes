@@ -1,0 +1,3 @@
+# Text files keep LF line endings on every checkout, Windows included, so the Docker image
+# (and the scripts, prompts and templates in it) is the same whichever OS it is built on
+* text=auto eol=lf

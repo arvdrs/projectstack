@@ -1,0 +1,24 @@
+# Only what the image needs. Recordings, results and personal files never go into it
+# (patterns need **/ to match below the top folder).
+.git
+.venv
+**/__pycache__
+**/*.pyc
+*.egg-info
+.pytest_cache
+.claude
+.vscode
+**/.env
+**/.env.*
+
+projectstack/ui-web/node_modules
+projectstack/ui-web/dist
+
+workspace
+/results
+**/*.har
+**/*.jtl
+**/*.jmx
+**/*.log
+**/Screenshot*.png
+sample_postman.json

@@ -11,6 +11,9 @@ configured without a settings file:
   PSTACK_CLICKHOUSE_URL       clickhouse://user:password@host:8123/database?secure=1
   PSTACK_CLICKHOUSE_HOST / _PORT / _USER / _PASSWORD / _DATABASE / _SECURE
   PSTACK_RUNS_DIR             folder for per-run artifacts (reports, findings)
+
+PSTACK_DEFAULT_<SETTING> changes a default instead (the Docker image points ollama_url
+at the host this way); a value saved in Settings still wins over it.
 """
 
 from __future__ import annotations
@@ -63,6 +66,13 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "llm_models": "",                     # JSON: default model per provider, e.g. {"claude": "claude-opus-5-5"}
     "runs_dir": str(Path.home() / ".projectstack" / "runs"),
 }
+
+for _key in DEFAULT_SETTINGS:
+    if os.environ.get(f"PSTACK_DEFAULT_{_key.upper()}"):
+        DEFAULT_SETTINGS[_key] = os.environ[f"PSTACK_DEFAULT_{_key.upper()}"]
+
+# Set by the Docker image: the machine's browser and cloud sign-ins are outside the container
+IN_DOCKER = os.environ.get("PSTACK_IN_DOCKER") == "1"
 
 SECRET_FIELDS = (
     "anthropic_api_key", "openai_api_key", "groq_api_key", "gemini_api_key", "gmail_app_password",

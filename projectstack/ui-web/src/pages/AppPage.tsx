@@ -5,7 +5,7 @@ import {
   FileText, Download, Play, BarChart2, ChevronRight,
   Code, Zap, RefreshCw, Info, Globe, Eye, X, ChevronDown, ChevronUp,
   Search, Shield, Cpu, FileDown, RotateCcw, XCircle, Wrench, Layers, Scissors, Sparkles, Target, Plus,
-  Square, Video,
+  Square, Video, Copy, Check,
 } from 'lucide-react'
 
 import ReportAnalyzer from '../components/ReportAnalyzer'
@@ -704,6 +704,54 @@ function TransactionsPanel({ sessionId, requests }: {
 // Proxy recorder — record a journey and name its transactions as you go
 // ---------------------------------------------------------------------------
 
+// In Docker the backend cannot open a window on the viewer's computer, so they open one with this
+// command: a separate Chrome profile (the proxy flag only applies to a new Chrome process, even
+// while Chrome is already open) whose traffic goes through the recorder
+function recordingBrowserCommand(port: number, url: string): { how: string; cmd: string } {
+  const flags = `--proxy-server=127.0.0.1:${port} --ignore-certificate-errors --no-first-run`
+  const start = url ? ` "${url}"` : ''
+  const ua = navigator.userAgent
+  if (/Windows/.test(ua)) {
+    return { how: 'Press Win + R, paste this and press Enter:', cmd: `chrome ${flags} --user-data-dir="%TEMP%\\pstack-recording"${start}` }
+  }
+  if (/Macintosh|Mac OS X/.test(ua)) {
+    return { how: 'Paste this in Terminal:', cmd: `open -na "Google Chrome" --args ${flags} --user-data-dir=/tmp/pstack-recording${start}` }
+  }
+  return { how: 'Paste this in a terminal:', cmd: `google-chrome ${flags} --user-data-dir=/tmp/pstack-recording${start}` }
+}
+
+function DockerBrowserCommand({ port, url }: { port: number; url: string }) {
+  const [copied, setCopied] = useState(false)
+  const { how, cmd } = recordingBrowserCommand(port, url)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(cmd)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch { /* clipboard blocked — the command can still be selected */ }
+  }
+  return (
+    <div style={{ background: 'rgba(var(--info-rgb),0.08)', border: '1px solid rgba(var(--info-rgb),0.25)', borderRadius: '12px', padding: '12px 16px', fontSize: '14px' }}>
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', color: 'var(--info)' }}>
+        <Info size={16} style={{ flexShrink: 0, marginTop: '2px' }} />
+        <span>ProjectStack is running in Docker, so it can't open the recording window itself. {how}</span>
+      </div>
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '10px' }}>
+        <code style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere', fontSize: '12px', lineHeight: 1.6, padding: '8px 10px', borderRadius: '8px', background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)', userSelect: 'all' }}>{cmd}</code>
+        <button onClick={copy} aria-label="Copy the command"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', flexShrink: 0, background: 'transparent', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--text-secondary)', cursor: 'pointer', padding: '7px 10px', fontSize: '12px' }}>
+          {copied ? <Check size={13} /> : <Copy size={13} />} {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+      <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '8px', lineHeight: 1.6 }}>
+        It opens a separate Chrome window whose traffic goes through the recorder; record the journey there and close
+        it when you're done. Chrome warns about an unsupported flag: that flag lets the recorder read HTTPS pages, and
+        it applies to this window only.
+      </div>
+    </div>
+  )
+}
+
 function RecorderPanel({ onRecorded }: { onRecorded: (res: ProxyStopResult) => void }) {
   const [status, setStatus] = useState<ProxyStatusResult | null>(null)
   const [startUrl, setStartUrl] = useState('')
@@ -785,7 +833,9 @@ function RecorderPanel({ onRecorded }: { onRecorded: (res: ProxyStopResult) => v
           <div>
             <div style={{ fontSize: '16px', fontWeight: 600 }}>Record a user journey</div>
             <div style={{ fontSize: '13px', color: 'var(--text-muted)', marginTop: '3px', lineHeight: 1.6 }}>
-              Opens a separate Chrome window whose traffic goes through ProjectStack's recorder. Before each step of the
+              {status?.in_docker
+                ? "Records a separate Chrome window whose traffic goes through ProjectStack's recorder (ProjectStack runs in Docker here, so once you start, it shows the command that opens that window)."
+                : "Opens a separate Chrome window whose traffic goes through ProjectStack's recorder."} Before each step of the
               journey, type its name and start the transaction — the requests that follow are grouped under it, just like
               naming Transaction Controllers in JMeter's recorder.
             </div>
@@ -838,7 +888,12 @@ function RecorderPanel({ onRecorded }: { onRecorded: (res: ProxyStopResult) => v
         </div>
       </div>
 
-      {launch && !launch.chromium_launched && (
+      {status?.in_docker ? (
+        // also after a page reload, when the start response (launch) is gone
+        <div style={{ marginBottom: '14px' }}>
+          <DockerBrowserCommand port={port} url={startUrl.trim()} />
+        </div>
+      ) : launch && !launch.chromium_launched && (
         <div style={{ marginBottom: '14px' }}>
           <InfoBox msg={`Couldn't open Chrome automatically — set your browser's HTTP proxy to 127.0.0.1:${port} and record there.`} />
         </div>

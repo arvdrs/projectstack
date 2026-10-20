@@ -139,7 +139,7 @@ def ingest(db: ResultsDB, run_id: str, info: FileInfo, max_bad_rows: int = 0) ->
     warnings: list[str] = []
     if info.fmt == "xml":
         info, chunks, gz = _xml_as_csv(info, warnings)
-        if not db.cfg.is_local:
+        if not db.cfg.is_nearby:
             chunks, gz = _gzip_stream(chunks), True
     else:
         chunks, gz = _csv_chunks(db, info)
@@ -227,7 +227,7 @@ def _gzip_stream(chunks: Iterator[bytes]) -> Iterator[bytes]:
 def _csv_chunks(db: ResultsDB, info: FileInfo) -> tuple[Iterator[bytes], bool]:
     if info.gzipped:
         return file_chunks(info.path), True          # ClickHouse decompresses it
-    if db.cfg.is_local:
+    if db.cfg.is_nearby:
         return file_chunks(info.path), False
     return file_chunks(info.path, gzip_level=1), True  # remote server: compress on the fly
 

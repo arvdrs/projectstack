@@ -87,6 +87,11 @@ class ClickHouseConfig:
     def is_local(self) -> bool:
         return self.host in ("localhost", "127.0.0.1", "::1")
 
+    @property
+    def is_nearby(self) -> bool:
+        """This machine, or a single-label name such as a Docker Compose service: uploads go uncompressed."""
+        return self.is_local or "." not in self.host
+
 
 def quote_literal(value: str) -> str:
     """A ClickHouse string literal."""

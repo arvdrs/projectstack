@@ -387,7 +387,8 @@ def run_jmeter(
         # JMeter requires the output directory to be empty or non-existent
         if html_path.exists():
             shutil.rmtree(html_path)
-        cmd += ["-e", "-o", str(html_path)]
+        # Its scratch folder defaults to temp/ in the working directory, which may not be writable
+        cmd += ["-e", "-o", str(html_path), f"-Jjmeter.reportgenerator.temp_dir={out_dir / 'report-temp'}"]
 
     env = None
     if save_responses:

@@ -14,6 +14,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
+from projectstack.config import IN_DOCKER
 from projectstack.results.cloud import CloudError, FetchResult, Resource, Series, period_for
 from projectstack.results.cloud.presets import AWS, MetricDef
 
@@ -57,6 +58,10 @@ class AwsMonitor:
     def _explain(exc: Exception, what: str) -> CloudError:
         from botocore.exceptions import ClientError, NoCredentialsError, NoRegionError, TokenRetrievalError
         if isinstance(exc, (NoCredentialsError, TokenRetrievalError)):
+            if IN_DOCKER:
+                return CloudError("No AWS credentials — ProjectStack is running in Docker: add read-only keys in Settings, or "
+                                  "start it with docker-compose.aws.yml to use your `aws configure` / `aws sso login` sign-in "
+                                  "(README → Run with Docker)")
             return CloudError("No AWS credentials — run `aws configure` or `aws sso login` on this machine, or add read-only keys in Settings")
         if isinstance(exc, NoRegionError):
             return CloudError("No AWS region — set one in Settings (aws_region)")

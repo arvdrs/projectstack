@@ -754,6 +754,7 @@ export interface ProxyStartResult {
   chromium_launched?: boolean
   chromium_bin?: string | null
   cert_trusted?: boolean
+  in_docker?: boolean          // the backend runs in Docker and cannot open a browser window
 }
 
 export interface ProxyStartParams {
@@ -782,6 +783,7 @@ export interface ProxyStatusResult {
   current_transaction: string
   transactions: { name: string; request_count: number }[]
   browser_open: boolean
+  in_docker?: boolean
 }
 
 export async function proxyStart(params: ProxyStartParams = {}): Promise<ProxyStartResult> {

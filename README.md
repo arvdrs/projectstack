@@ -3,8 +3,170 @@
 Turns browser recordings (HAR files, or the built-in proxy recorder) into JMeter
 test plans with automatic correlation, runs them, and analyses the results.
 
+- Docker, with everything included: `docker compose up -d --build`, then open http://localhost:6292.
+  See [Run with Docker](#run-with-docker).
 - Web app: `cd projectstack/ui-web && ./start.sh`, then open http://localhost:6292
 - CLI: `pip install -e .`, then `pstack --help`
+
+## Run with Docker
+
+The quickest way to run ProjectStack on your own computer. One command starts the web app
+with everything it uses, so you don't install Python, Node, Java, JMeter or ClickHouse
+yourself, and you get the same versions as the machine ProjectStack is developed on.
+
+### What you need
+
+- **Docker**:
+  - macOS or Windows: Docker Desktop (on Windows, with the WSL 2 backend).
+  - Linux: Docker Engine with the Compose plugin.
+  - `docker compose version` should print v2 or later.
+  - Intel and Apple Silicon both work.
+- **Memory:** give Docker at least 4 GB; 8 GB is better, since JMeter can use up to 8 GB in a
+  large test. In Docker Desktop, set it under Settings → Resources.
+- **Disk:** about 5 GB for the images, plus your results.
+
+### Start it
+
+```bash
+git clone https://github.com/arvdrs/projectstack.git
+cd projectstack
+docker compose up -d --build
+```
+
+The first build takes 5–10 minutes, because it downloads JMeter, the Python packages and the
+base images. After that, starting takes a few seconds. Once `docker compose ps` shows both
+services as `healthy`, open **http://localhost:6292**.
+
+### What's inside
+
+| Part | What you get |
+| --- | --- |
+| Web app and API | The full app at http://localhost:6292, with the API under `/api` |
+| Python | 3.10, with the exact package versions in `requirements.lock` |
+| JMeter | 5.6 on Java 11, with the same plugins and libraries as the reference install (listed in `deploy/docker/jmeter-libs.txt`), the same 8 GB heap limit (`-Xmx8g`) and a 30-minute HTML report timeout |
+| JMeter plugins | Custom Thread Groups (Stepping, Ultimate, Concurrency, Arrivals), Dummy Sampler, Plugins Manager, WebSocket Samplers (Peter Doornbosch), WebSocket Sampler (Maciej Zaleski), Apache POI 5.2.3 for Excel files |
+| ClickHouse | 25.8, for results analysis, already connected |
+| `pstack` CLI | Inside the app container |
+
+### Everyday commands
+
+Run these in the `projectstack` folder.
+
+| To | Run |
+| --- | --- |
+| Stop | `docker compose stop` |
+| Start again | `docker compose up -d` |
+| Update after `git pull` | `docker compose up -d --build` |
+| Check that it is running | `docker compose ps` |
+| See the app's log | `docker compose logs -f app` |
+| Use the CLI | `docker compose run --rm app pstack --help` |
+| Open a shell in the container | `docker compose run --rm app bash` |
+
+Docker restarts ProjectStack with Docker itself, for example after a reboot, unless you
+stopped it.
+
+The `workspace/` folder in your clone is the CLI's working folder (`/workspace` in the
+container). Put files there to use them from the CLI, and find the CLI's output files there.
+On Linux, files the container writes there belong to you, like files you create yourself:
+
+```bash
+cp ~/Downloads/results.jtl workspace/
+docker compose run --rm app pstack analyze results.jtl --scenario checkout --tag build-42
+```
+
+The web app doesn't need this folder: you upload and download files in the browser as usual.
+
+### Where your data is kept
+
+- **Settings** (including API keys), sessions, JMeter reports, uploaded files and the
+  recorder's certificate are in the Docker volume `projectstack_data`.
+- **Analysed runs** are in the volume `projectstack_clickhouse-data`.
+
+Both survive stopping, restarting, rebuilding and updating. `docker compose down` removes the
+containers and keeps the volumes. `docker compose down -v` also deletes the volumes, which
+means all your settings and results.
+
+### Differences from running it directly
+
+- **Recording a journey.** ProjectStack can't open a browser window from inside Docker. After
+  **Start recording**, it shows a command for your system that opens a separate Chrome window
+  whose traffic goes through the recorder (port 8082). Copy it, run it, and record in that
+  window.
+  - Chromium on Linux: replace `google-chrome` with `chromium`.
+  - Any other browser: set its HTTP and HTTPS proxy to `127.0.0.1:8082` and install the
+    certificate from http://mitm.it.
+- **`localhost` means the container itself.** To reach something running on your own computer
+  (the application under test, Ollama, InfluxDB for Grafana), use `host.docker.internal`, for
+  example `http://host.docker.internal:3000`. This applies to scripts you run from ProjectStack
+  and to addresses in Settings.
+- **Ollama.** Settings already points at `http://host.docker.internal:11434`. On Linux, Ollama
+  only accepts connections from the computer itself by default, so make it listen on all
+  addresses:
+  1. Run `sudo systemctl edit ollama`.
+  2. Add these two lines:
+     ```
+     [Service]
+     Environment="OLLAMA_HOST=0.0.0.0"
+     ```
+  3. Run `sudo systemctl restart ollama`.
+
+  Your firewall then decides whether other computers can reach Ollama.
+- **Server metrics sign-in.** Read-only keys in **Settings → Cloud Monitoring** work as usual.
+  - AWS CLI sign-in: to use your own (`aws configure` or `aws sso login`) instead of keys,
+    start ProjectStack with the extra file, and use the same command every time you start it:
+    ```bash
+    docker compose -f docker-compose.yml -f docker-compose.aws.yml up -d
+    ```
+  - Azure: `az login` isn't available in the container, so use a service principal in
+    Settings.
+- **Time zone.** Run summaries and JMeter's dashboard show times in Asia/Kolkata. To use
+  another time zone, set `TZ` in `.env` (below).
+
+### Settings for your computer (`.env`)
+
+To change any of these, create a file named `.env` next to `docker-compose.yml` with the
+lines you need, then run `docker compose up -d`.
+
+```bash
+# Use another port if 6292 is taken
+PSTACK_PORT=6300
+# Your time zone
+TZ=Europe/London
+# A smaller JMeter heap when Docker has less than 8 GB of memory
+JMETER_HEAP="-Xms1g -Xmx4g -XX:MaxMetaspaceSize=512m"
+# Store results in a shared team ClickHouse instead of the one in Docker
+PSTACK_CLICKHOUSE_URL=clickhouse://user:password@clickhouse.example.internal:8123/projectstack
+```
+
+`.env` is ignored by git, so it stays on your computer.
+
+### If something goes wrong
+
+- **"port is already allocated"**: another program is using 6292 or 8082, such as ProjectStack
+  started with `start.sh`. Stop that program, or set `PSTACK_PORT` in `.env` (the recorder
+  needs 8082 to be free).
+- **The page doesn't load right after starting**: wait until `docker compose ps` shows
+  `healthy`. ClickHouse starts first.
+- **"Cannot reach ClickHouse"**: run `docker compose up -d clickhouse`. If that doesn't fix
+  it, `docker compose logs clickhouse` shows why it stopped.
+- **The build fails while downloading** (company proxy or VPN): set the proxy in Docker
+  Desktop under Settings → Resources → Proxies. On Linux, set it under `"proxies"` in
+  `~/.docker/config.json`. Then run `docker compose up -d --build` again.
+- **A test stops with exit code 137**: Docker ran out of memory. Give Docker more memory, or
+  lower `JMETER_HEAP`.
+- **Docker installed as a snap (Ubuntu)**: clone ProjectStack inside your home folder,
+  because the snap can't use folders outside it.
+
+### For maintainers
+
+- **Python packages:** after upgrading one, regenerate the pinned versions with
+  `.venv/bin/python scripts/lock_requirements.py > requirements.lock`, then rebuild.
+- **JMeter plugins:** to add one for everyone, add its jar's folder, SHA-256 and URL to
+  `deploy/docker/jmeter-libs.txt`, then rebuild.
+- **Tests in the container:** `docker compose run --rm app pytest /app/tests -q -p no:cacheprovider`.
+- **CLI commands run with `docker compose run --rm app …`**, not `exec`: `run` goes through the
+  container's start-up step, which runs commands as your user. `exec` runs them as root, and
+  files root creates in the data volume are then read-only for the app.
 
 ## Results analysis
 
@@ -48,7 +210,8 @@ for a report, or ask a question.
 
 ### Setup
 
-ProjectStack uses a local ClickHouse by default:
+With [Docker](#run-with-docker), ClickHouse is already running and connected; skip this.
+Otherwise ProjectStack uses a local ClickHouse by default:
 
 ```bash
 docker compose -f deploy/clickhouse/docker-compose.yml up -d
@@ -624,4 +787,5 @@ pstack analyze results.jtl --tag "$CI_COMMIT_SHORT_SHA"
 
 The user needs to be able to create tables in that database (or an admin applies
 `projectstack/results/schema/*.sql`, replacing `{db}` and `{retention_days}`). Uploads
-to non-local servers are gzip-compressed on the fly.
+to servers on other machines (a host name with a dot, or an IP address) are gzip-compressed
+on the fly; `localhost` and single-word names such as Docker's `clickhouse` get them as is.

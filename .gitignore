@@ -27,3 +27,7 @@ projectstack/ui-web/dist/
 # Personal files and recordings from real systems
 Screenshot*.png
 sample_postman.json
+
+# Docker: files exchanged with the CLI in the container
+/workspace/*
+!/workspace/.gitkeep
