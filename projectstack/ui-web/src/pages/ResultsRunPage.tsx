@@ -94,7 +94,7 @@ export default function ResultsRunPage() {
         </div>
 
         <Card style={{ marginBottom: '20px' }}>
-          <CardTitle>Observations</CardTitle>
+          <CardTitle>Performance Highlights & Observations</CardTitle>
           <ObservationsPanel analysis={a} />
         </Card>
 

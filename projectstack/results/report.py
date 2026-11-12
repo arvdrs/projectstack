@@ -197,7 +197,9 @@ def _evidence(ev: dict[str, Any]) -> tuple[list[tuple[str, Any]], list[dict[str,
     return scalars, tables
 
 
-def context(doc: dict, narrative: Narrative, audience: str) -> dict[str, Any]:
+def context(doc: dict, narrative: Narrative, audience: str, highlights: Narrative | None = None) -> dict[str, Any]:
+    from projectstack.results import highlights as hl
+    highlights = highlights or hl.from_rules(doc)
     run, sla = doc["run"], doc.get("sla", {})
     icon, label, cls = VERDICTS.get(doc.get("verdict"), ("?", str(doc.get("verdict")), "neutral"))
     content = narrative.content
@@ -228,14 +230,18 @@ def context(doc: dict, narrative: Narrative, audience: str) -> dict[str, Any]:
         ("Error rate", fmt.pct(req.get("error_pct")), "requests, steady state"),
         ("Throughput", fmt.rate(stats.get("tps")), f"{kind}s per second"),
     ] if stats else [("Peak users", fmt.num(run.get("peak_users")), "")]
-    check = narrative.numbers
+    check, h_check = narrative.numbers, highlights.numbers
+    unverified = (check.unverified if check else []) + [
+        {**u, "field": f"highlights.{u['field']}"} for u in (h_check.unverified if h_check else [])]
     return {
         "doc": doc, "run": run, "sla": sla, "steady": doc.get("steady", {}), "audience": audience,
         "verdict": {"key": doc.get("verdict"), "icon": icon, "label": label, "cls": cls},
         "n": content, "narrative": narrative, "findings": findings, "tables": tables, "kind": kind,
+        "h": highlights.content, "h_narrative": highlights,
+        "h_check": h_check.describe("the results and notes") if h_check else "",
         "failed_by_label": failed_by_label, "tiles": tiles, "errors": doc.get("errors", []),
         "skipped": doc.get("skipped", []), "truncated": doc.get("truncated", {}), "notes": doc.get("notes", []),
-        "unverified": check.unverified if check else [], "number_check": check.describe() if check else "",
+        "unverified": unverified, "number_check": check.describe() if check else "",
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
         "timeline_rows": chart.series(doc),
         "baseline": doc.get("baseline"),
@@ -245,9 +251,10 @@ def context(doc: dict, narrative: Narrative, audience: str) -> dict[str, Any]:
     }
 
 
-def render(doc: dict, narrative: Narrative, audience: str, out_format: str) -> str:
+def render(doc: dict, narrative: Narrative, audience: str, out_format: str,
+           highlights: Narrative | None = None) -> str:
     from markupsafe import Markup
-    ctx = context(doc, narrative, audience)
+    ctx = context(doc, narrative, audience, highlights)
     if out_format == "html":
         ctx["chart"] = Markup(chart.timeline_svg(doc)) if audience == "tech" else ""
         ctx["chart_script"] = Markup(chart.SCRIPT)
@@ -270,9 +277,13 @@ def build_report(ref: str, *, audience: str = "tech", formats: tuple[str, ...] =
     folder, doc = locate(ref, Path(settings["runs_dir"]), resolve_in_db)
     narrative, reused, warnings = get_narrative(doc, folder, audience, use_llm=use_llm, provider_spec=provider_spec,
                                                 strict=strict, fresh=fresh, settings=settings, progress=progress)
-    report = Report(doc["run"]["run_id"], audience, narrative, reused=reused, warnings=warnings)
+    from projectstack.results import highlights as hl
+    test_context = hl.resolve_context(folder, doc["run"].get("scenario", ""), Path(settings["runs_dir"]))
+    section, _, h_warnings = hl.get(doc, folder, test_context, use_llm=use_llm, provider_spec=provider_spec,
+                                    strict=strict, fresh=fresh, settings=settings, progress=progress)
+    report = Report(doc["run"]["run_id"], audience, narrative, reused=reused, warnings=warnings + h_warnings)
     for f in formats:
-        text = render(doc, narrative, audience, f)
+        text = render(doc, narrative, audience, f, section)
         target = _target(out, folder, audience, f, len(formats))
         if target is None:
             report.stdout = text

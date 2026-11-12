@@ -76,7 +76,9 @@ def build(meta: dict[str, Any], metrics: dict[str, Any], steady: dict[str, Any],
         "sla": sla_result,
         **({"baseline": baseline} if baseline else {}),
         "overall": metrics["overall"],
-        "labels": {k: [{key: s[key] for key in _LABEL_KEYS} for s in v] for k, v in metrics["labels"].items()},
+        "labels": {k: [{**{key: s[key] for key in _LABEL_KEYS},
+                        **{key: s[key] for key in ("run_samples", "run_errors") if s.get(key) is not None}}
+                       for s in v] for k, v in metrics["labels"].items()},
         "timeline": {"bucket_s": metrics["timeline"]["bucket_s"], "users_source": metrics["timeline"]["users_source"],
                      "points": points},
         "errors": [{**{k: e[k] for k in ("label", "response_code", "response_message", "failure", "count")},
@@ -89,7 +91,8 @@ def build(meta: dict[str, Any], metrics: dict[str, Any], steady: dict[str, Any],
         "notes": [
             "Percentiles are exact over the samples in scope (JMeter Aggregate Report definition); "
             "they are never averaged across labels or time buckets.",
-            "Label and overall statistics cover the steady-state window; the timeline and errors cover the full run.",
+            "Label and overall statistics cover the steady-state window; the timeline and errors cover the full run, "
+            "and so do run_samples and run_errors on each label.",
         ],
     }
     return _fit(doc, named, metrics["timeline"]["bucket_s"])

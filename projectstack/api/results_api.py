@@ -257,6 +257,18 @@ def observations(doc: dict[str, Any]) -> dict[str, Any]:
     return from_rules(doc, "exec").content
 
 
+def _test_context(folder: Path, doc: dict[str, Any]) -> dict[str, Any]:
+    from projectstack.results import highlights
+    return highlights.resolve_context(folder, doc["run"].get("scenario", ""), Path(_settings()["runs_dir"]))
+
+
+def _highlights(folder: Path, doc: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+    """The Performance Highlights & Observations section: rule-based, and the saved AI version if still current."""
+    from projectstack.results import highlights
+    return {"highlights": highlights.rules(doc, ctx), "highlights_ai": highlights.cached(folder, doc, ctx),
+            "context": ctx}
+
+
 @router.get("/runs/{run_ref}")
 def run_detail(run_ref: str) -> dict[str, Any]:
     run_id, folder = _resolve(run_ref)
@@ -270,6 +282,7 @@ def run_detail(run_ref: str) -> dict[str, Any]:
         "has_plan": (folder / "plan.jmx").exists(),
         "observations": observations(doc),
         "observations_ai": _cached_ai(folder, "exec", doc),
+        **_highlights(folder, doc, _test_context(folder, doc)),
         "folder": str(folder),
     }
 
@@ -277,6 +290,41 @@ def run_detail(run_ref: str) -> dict[str, Any]:
 class AiRequest(BaseModel):
     provider: str | None = None
     fresh: bool = False
+
+
+class ContextRequest(BaseModel):
+    region: str = ""
+    test_type: str = ""
+    notes: str = ""
+
+
+@router.put("/runs/{run_ref}/context")
+def save_test_context(run_ref: str, body: ContextRequest) -> dict[str, Any]:
+    """Save the run's test context (region, test type, notes); returns the section rewritten with it."""
+    from projectstack.results import highlights
+    run_id, folder = _resolve(run_ref)
+    doc = _findings(folder)
+    highlights.save_context(folder, body.model_dump())
+    return _highlights(folder, doc, _test_context(folder, doc))
+
+
+@router.post("/runs/{run_ref}/highlights")
+async def ai_highlights(run_ref: str, body: AiRequest) -> dict[str, Any]:
+    """Ask the AI provider to write the section (findings.json, the computed facts and the notes are sent)."""
+    from projectstack.results import highlights
+    from projectstack.results.report import ReportError
+    run_id, folder = _resolve(run_ref)
+    doc = _findings(folder)
+    ctx = _test_context(folder, doc)
+    try:
+        section, reused, warnings = await asyncio.to_thread(
+            highlights.get, doc, folder, ctx, use_llm=True, provider_spec=body.provider, strict=False,
+            fresh=body.fresh, settings=_settings())
+    except ReportError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"content": section.content, "source": section.source, "provider": section.provider,
+            "prompt": section.prompt, "numbers": section.numbers.as_dict() if section.numbers else None,
+            "note": section.note, "reused": reused, "warnings": warnings}
 
 
 @router.post("/runs/{run_ref}/observations")

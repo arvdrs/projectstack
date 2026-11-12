@@ -78,6 +78,8 @@ dl.ev dd { margin: 0; font-variant-numeric: tabular-nums; }
   <p>{{ n.summary }}</p>
 </section>
 
+{% include "highlights.html.j2" %}
+
 {% if sla.defined %}
 <section class="card">
   <h2>SLA results</h2>

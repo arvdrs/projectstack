@@ -188,6 +188,18 @@ the raw samples; nothing is estimated by a model.
   run. It uses the run's results, the SLA you set in step 3 and the generated script (so correlation
   problems point at the extractor responsible), compares the run with the last passing run of the
   same script, and shows the high-level observations with a link to the full analysis.
+- **Performance Highlights & Observations** (top of a run's page, and in both reports): when the test
+  ran, the test type, users, region and load profile ("an 18-minute stepped ramp-up followed by 58
+  minutes of steady-state execution"), the headline statistics (maximum users, total requests, average
+  throughput and total errors over the whole run), and observations: errors and throughput, how
+  consistent response times were, the slowest endpoint, gains or regressions against the baseline, and
+  serious findings. **Test context** under it holds the region, an optional test type and notes (what
+  endpoints do, what changed since the last run, quotas and limits); runs of the same scenario without
+  their own context use the latest one. The section has two options: **Without AI** (the default),
+  written by rules with nothing sent anywhere, and **With AI**, which rewrites it in report style using
+  the notes. With AI, your AI provider gets findings.json, the computed figures and the notes, and every
+  number it writes is checked against them; the AI version is saved, so switching back to it is instant
+  and **Rewrite** asks for a new one. **Copy** puts the version on screen on the clipboard as plain text.
 
 - **Per request and transaction**: click any label on a run's page (or search for it among all the
   run's labels) for its own page: a plain-language summary and a status (needs action / worth a look /

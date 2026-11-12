@@ -19,6 +19,7 @@ Run `{{ run.run_id }}`{% if run.tag %} · {{ run.tag }}{% endif %} · {{ run.sta
 
 {{ n.summary }}
 
+{% include "highlights.md.j2" %}
 {% if sla.defined %}
 ## SLA results
 

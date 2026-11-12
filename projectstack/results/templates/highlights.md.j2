@@ -1,0 +1,22 @@
+## Performance Highlights & Observations
+
+{% for s in h.intro %}
+{{ s }}
+
+{% endfor %}
+Below are the high-level statistics from the test:
+
+{% for s in h.stats %}
+- {{ s.name }}: **{{ s.value }}**
+{% endfor %}
+
+<!-- observations -->
+
+{% for o in h.observations %}
+- {{ o }}
+{% endfor %}
+
+{% if h_narrative.source == "llm" %}
+*Written by {{ h_narrative.provider }} ({{ h_narrative.prompt }}) from the results and the test notes; {{ h_check }}.*
+
+{% endif %}

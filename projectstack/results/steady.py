@@ -35,10 +35,12 @@ class Steady:
     peak_users: int
     levels: list[dict] = field(default_factory=list)   # [{users, start_ms, end_ms}]
     note: str = ""
+    plateau_ms: tuple[int, int] | None = None          # the untrimmed plateau: full load from … to
 
     def as_dict(self) -> dict:
+        plateau = {"plateau_start_ms": self.plateau_ms[0], "plateau_end_ms": self.plateau_ms[1]} if self.plateau_ms else {}
         return {**self.window.as_dict(), "method": self.method, "plateau_users": self.plateau_users,
-                "peak_users": self.peak_users, "levels": self.levels, "note": self.note}
+                "peak_users": self.peak_users, "levels": self.levels, "note": self.note, **plateau}
 
 
 def users_series(db: ResultsDB, run_id: str, from_threads: bool) -> tuple[list[tuple[int, int]], int]:
@@ -95,7 +97,8 @@ def detect(series: list[tuple[int, int]], step_s: int, bounds: dict, method: str
     plateau_users = round(sorted(u for _, u in filled[a:b + 1])[(b - a) // 2])
     return Steady(Window(start_ms, end_ms, "auto", (end_ms - start_ms) / 1000), method, plateau_users, peak, levels,
                   f"{peak} users held from t+{(plateau_start - bounds['start_ms']) / 1000:.0f}s to "
-                  f"t+{(plateau_end - bounds['start_ms']) / 1000:.0f}s; {trim_ms / 1000:.0f}s trimmed at each end")
+                  f"t+{(plateau_end - bounds['start_ms']) / 1000:.0f}s; {trim_ms / 1000:.0f}s trimmed at each end",
+                  (plateau_start, plateau_end))
 
 
 def _fill(series: list[tuple[int, int]], step_s: int) -> list[tuple[int, int]]:

@@ -81,6 +81,19 @@ def test_upload_analyse_and_read(client, tmp_path):
     assert run["observations"]["headline"] and run["observations"]["key_points"]
     assert run["observations_ai"] is None and run["sla"]["defined"]
 
+    # Performance Highlights & Observations, then a test context that changes it
+    h = run["highlights"]
+    assert h["intro"][0].startswith("The test was executed on ") and "20 concurrent users." in h["intro"][1]
+    assert "ramp-up followed by" in h["intro"][2]
+    assert [s["name"] for s in h["stats"]] == ["Maximum users", "Total requests", "Average throughput", "Total errors"]
+    assert h["observations"][0].startswith("Executed ") and run["highlights_ai"] is None
+    assert run["context"]["source"] == "none"
+    assert all(r["run_samples"] >= r["samples"] for r in run["labels"]["request"])     # whole run vs steady state
+    saved = client.put(f"/api/results/runs/{job['run_id']}/context",
+                       json={"region": "us-east-1", "test_type": "", "notes": "Checkout calls the payment API."}).json()
+    assert saved["context"]["source"] == "run" and saved["context"]["notes"] == "Checkout calls the payment API."
+    assert saved["highlights"]["intro"][1].endswith("20 concurrent users from the us-east-1 region.")
+
     listed = client.get("/api/results/runs").json()["runs"]
     assert listed[0]["run_id"] == job["run_id"] and listed[0]["created_at"].endswith("+00:00")
 
@@ -98,6 +111,9 @@ def test_upload_analyse_and_read(client, tmp_path):
     second = _wait(client, second["id"])
     detail = client.get(f"/api/results/runs/{second['run_id']}").json()
     assert detail["baseline"]["found"] and detail["baseline"]["run_id"] == job["run_id"]
+    assert isinstance(detail["baseline"]["improvements"], list)
+    assert detail["context"]["source"] == "inherited" and detail["context"]["from_run"] == job["run_id"]
+    assert "us-east-1" in detail["highlights"]["intro"][1]
     cmp = client.get(f"/api/results/compare?base={job['run_id']}&current={second['run_id']}").json()
     assert cmp["load"]["comparable"] and cmp["summary"]["regressed"] == 0
 

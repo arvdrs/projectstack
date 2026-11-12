@@ -166,7 +166,7 @@ def _diff_pct(a: float, b: float) -> float | None:
 
 
 def _stats(s: dict[str, Any]) -> dict[str, Any]:
-    return {k: s.get(k) for k in ("samples", "avg_ms", "p90_ms", "p95_ms", "p99_ms", "error_pct", "tps")}
+    return {k: s.get(k) for k in ("samples", "avg_ms", "p50_ms", "p90_ms", "p95_ms", "p99_ms", "error_pct", "tps")}
 
 
 def _row(kind: str, label: str, base: dict, cur: dict, th: RegressionThresholds) -> dict[str, Any]:
@@ -314,7 +314,19 @@ def baseline_section(comp: dict[str, Any] | None, requested: str | None, note: s
         return {"requested": requested, "found": False, "note": note}
     return {"requested": requested, "found": True, **{k: comp["baseline"][k] for k in ("run_id", "tag", "created_at")},
             "load": comp["load"], "gating": comp["gating"], "summary": comp["summary"],
-            "thresholds": comp["thresholds"]}
+            "thresholds": comp["thresholds"], "improvements": improvements(comp)}
+
+
+def improvements(comp: dict[str, Any], limit: int = 5) -> list[dict[str, Any]]:
+    """The labels that got clearly faster or more reliable than in the baseline, biggest p95 drop first."""
+    rows = [r for kind in ("transaction", "request") for r in (comp["kinds"].get(kind) or {}).get("labels", [])
+            if r["status"] == "improved"]
+    rows.sort(key=lambda r: (r["p95_change_pct"] if r["p95_change_pct"] is not None else 0, -(r["err_change_pp"] or 0)))
+    return [{"kind": r["kind"], "label": r["label"], "metrics": r["improved"], "samples": r["current"]["samples"],
+             "p50_before": r["baseline"]["p50_ms"], "p50_after": r["current"]["p50_ms"],
+             "p95_before": r["baseline"]["p95_ms"], "p95_after": r["current"]["p95_ms"],
+             "p95_change_pct": r["p95_change_pct"], "err_before": r["baseline"]["error_pct"],
+             "err_after": r["current"]["error_pct"]} for r in rows[:limit]]
 
 
 # ---------------------------------------------------------------------------

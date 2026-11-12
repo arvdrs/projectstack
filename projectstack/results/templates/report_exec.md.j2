@@ -14,12 +14,7 @@
 
 {% endif %}
 
-## Key points
-
-{% for p in n.key_points %}
-- {{ p }}
-{% endfor %}
-
+{% include "highlights.md.j2" %}
 ## Business impact
 
 {{ n.business_impact }}

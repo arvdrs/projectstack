@@ -1030,6 +1030,36 @@ export interface Observations {
 
 export interface NumberCheckResult { checked: number; unverified: { field: string; text: string }[]; ok: boolean }
 
+/** The "Performance Highlights & Observations" section */
+export interface Highlights {
+  intro: string[]
+  stats: { name: string; value: string }[]
+  observations: string[]
+}
+
+export interface AiHighlights {
+  content: Highlights
+  provider?: string | null
+  prompt?: string | null
+  numbers?: NumberCheckResult | null
+  source?: string
+  note?: string
+  warnings?: string[]
+  generated_at?: string
+}
+
+export interface TestContextFields { region: string; test_type: string; notes: string }
+
+/** The context that applies to a run: its own, inherited from its scenario's latest run, or none */
+export interface TestContext extends TestContextFields {
+  updated_at: string
+  source: 'run' | 'inherited' | 'none'
+  from_run: string | null
+  suggestion: (TestContextFields & { from_run: string; scenario: string; updated_at: string }) | null
+}
+
+export interface HighlightsState { highlights: Highlights; highlights_ai: AiHighlights | null; context: TestContext }
+
 export interface AiObservations {
   content: Observations
   provider?: string | null
@@ -1085,6 +1115,9 @@ export interface RunAnalysis {
   has_plan: boolean
   observations: Observations
   observations_ai: AiObservations | null
+  highlights: Highlights
+  highlights_ai: AiHighlights | null
+  context: TestContext
 }
 
 export interface AskQuery { n: number; sql: string; columns: string[]; rows: string[][]; truncated: boolean; seconds: number; error: string }
@@ -1159,6 +1192,18 @@ export async function getResultRun(runId: string): Promise<RunAnalysis> {
 export async function aiObservations(runId: string, fresh = false): Promise<AiObservations> {
   return fetchJson(`${API_BASE}/results/runs/${encodeURIComponent(runId)}/observations`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fresh }),
+  })
+}
+
+export async function aiHighlights(runId: string, fresh = false): Promise<AiHighlights> {
+  return fetchJson(`${API_BASE}/results/runs/${encodeURIComponent(runId)}/highlights`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fresh }),
+  })
+}
+
+export async function saveTestContext(runId: string, ctx: TestContextFields): Promise<HighlightsState> {
+  return fetchJson(`${API_BASE}/results/runs/${encodeURIComponent(runId)}/context`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(ctx),
   })
 }
 

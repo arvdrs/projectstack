@@ -1,0 +1,12 @@
+<section class="card highlights">
+  <h2>Performance Highlights &amp; Observations</h2>
+{% for s in h.intro %}
+  <p>{{ s }}</p>
+{% endfor %}
+  <p>Below are the high-level statistics from the test:</p>
+  <ul class="plain stats">{% for s in h.stats %}<li>{{ s.name }}: <strong>{{ s.value }}</strong></li>{% endfor %}</ul>
+  <ul class="plain points">{% for o in h.observations %}<li>{{ o }}</li>{% endfor %}</ul>
+{% if h_narrative.source == "llm" %}
+  <p class="small muted">Written by {{ h_narrative.provider }} ({{ h_narrative.prompt }}) from the results and the test notes; {{ h_check }}.</p>
+{% endif %}
+</section>

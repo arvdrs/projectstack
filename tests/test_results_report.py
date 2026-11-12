@@ -424,14 +424,19 @@ def test_locate_by_prefix_path_and_ambiguity(tmp_path):
 
 def test_build_report_reuses_ai_narrative(tmp_path, monkeypatch):
     folder = _run_folder(tmp_path)
-    fake = FakeProvider([GOOD_TECH])
+    highlights = {"intro": ["The load test ran with 50 concurrent users."],
+                  "observations": ["Executed 231,738 total requests at a combined throughput of 92.01 req/sec."]}
+    fake = FakeProvider([GOOD_TECH, highlights])
     monkeypatch.setattr(registry, "provider_for_task", lambda task, settings, override=None: fake)
     settings = {"runs_dir": str(tmp_path / "runs")}
     first = build_report("20261013", formats=("md",), settings=settings)
     assert not first.reused and first.files == [folder / "report_tech.md"]
+    md = first.files[0].read_text()
+    assert "The load test ran with 50 concurrent users." in md and "written by fake/fake-1 (report_highlights.v1)" in md.lower()
     second = build_report("20261013", formats=("html",), settings=settings)
-    assert second.reused and len(fake.calls) == 1
+    assert second.reused and len(fake.calls) == 2                       # the narrative and the highlights, once each
     assert json.loads((folder / "narrative_tech.json").read_text())["prompt"] == "report_tech.v1"
+    assert json.loads((folder / "narrative_highlights.json").read_text())["prompt"] == "report_highlights.v1"
 
 
 def test_build_report_falls_back_to_rules(tmp_path, monkeypatch):

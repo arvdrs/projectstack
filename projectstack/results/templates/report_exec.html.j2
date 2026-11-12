@@ -29,10 +29,7 @@ main { max-width: 860px; }
 </div>
 {% endif %}
 
-<section class="card">
-  <h2>Key points</h2>
-  <ul class="plain points">{% for p in n.key_points %}<li>{{ p }}</li>{% endfor %}</ul>
-</section>
+{% include "highlights.html.j2" %}
 
 <section class="card">
   <h2>Business impact</h2>

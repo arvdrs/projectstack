@@ -86,9 +86,15 @@ def compute(db: ResultsDB, run_id: str, window: Window, kinds: dict[str, str],
             GROUP BY label ORDER BY first_ms""",
         p,
     )
+    # Whole-run counts too: a quota or a daily limit counts every call, not only the steady state's
+    totals = {label: (int(n), int(e)) for label, n, e in db.rows(
+        f"""SELECT label, count(), countIf(NOT success) FROM {db.db}.samples
+            WHERE run_id = {{run:String}} AND {in_kind(db, "request", "transaction")} GROUP BY label""", p)}
     per_label = {"request": [], "transaction": []}
     for row in labels:
-        per_label[kinds[row["label"]]].append({"label": row["label"], **_stats(row, window.duration_s)})
+        n, e = totals.get(row["label"], (None, None))
+        per_label[kinds[row["label"]]].append({"label": row["label"], **_stats(row, window.duration_s),
+                                               "run_samples": n, "run_errors": e})
 
     overall = {}
     for kind in ("request", "transaction"):

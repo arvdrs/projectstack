@@ -11,8 +11,9 @@ Round figures may be approximate within 5% ("about 1,100 ms" for 1,066 ms).
 
 Before checking, label names, the run id, tag and scenario are taken out of the
 text, so "Step 3 /app/page/3" or "build-119" are not mistaken for figures.
-Clock times (09:17 UTC) and offsets (t+17m59s) are checked against the run's
-timestamps.
+Clock times (09:17 UTC, 08:09 - 09:28 AM) and offsets (t+17m59s) are checked
+against the run's timestamps, and dates (2026-10-28, October 28, 2026) against
+the days it ran.
 """
 
 from __future__ import annotations
@@ -26,8 +27,16 @@ from typing import Any, Iterable
 ALWAYS_ALLOWED = {0, 1, 2, 3, 4, 5, 50, 90, 95, 99, 100}     # small counts, percentile names, 100%
 _FACTORS = (1, 1 / 1000, 1 / 60, 1 / 3600, 1 / 60_000, 1 / 1_000_000, 100)   # ×100 only turns fractions into %
 
-_CLOCK_RE = re.compile(r"(?<![\d:])(\d{1,2}):(\d{2})(?::(\d{2}))?(?![\d:])")
+_CLOCK_RE = re.compile(r"(?<![\d:])(\d{1,2}):(\d{2})(?::(\d{2}))?(?![\d:])(?:\s*([AaPp])\.?[Mm]\.?(?![A-Za-z]))?")
+_CLOCK_RANGE_RE = re.compile(r"\s*(?:-|–|—|to)\s*")   # "08:09 - 09:28 AM": the first time takes the AM too
 _DATE_RE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
+_MONTHS = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")
+_MONTH = (r"(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|Sep(?:t(?:ember)?)?"
+          r"|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?")
+_LONG_DATE_RES = (   # October 28, 2026 · 28 October 2026
+    (re.compile(rf"\b{_MONTH}\s+(\d{{1,2}})(?:st|nd|rd|th)?,?\s+(\d{{4}})\b", re.I), (1, 2, 3)),
+    (re.compile(rf"\b(\d{{1,2}})(?:st|nd|rd|th)?\s+{_MONTH},?\s+(\d{{4}})\b", re.I), (2, 1, 3)),
+)
 # Offsets and durations: t+17m59s, t+18m, 41m 59s, 1h 05m — read as seconds
 _OFFSET_RES = (
     re.compile(r"\bt\s*\+\s*(?:(?P<h>\d+)\s*h\s*)?(?P<m>\d+)\s*m(?:in)?(?:\s*(?P<s>\d{1,2})\s*s)?\b"),
@@ -248,10 +257,25 @@ def check_text(text: str, allowed: Allowed, field_name: str, result: NumberCheck
             result.unverified.append({"field": field_name, "text": m.group(0)})
     text = _DATE_RE.sub(blank, text)
 
-    for m in _CLOCK_RE.finditer(text):
+    for rx, (mi, di, yi) in _LONG_DATE_RES:
+        for m in rx.finditer(text):
+            result.checked += 1
+            iso = f"{m.group(yi)}-{_MONTHS.index(m.group(mi)[:3].lower()) + 1:02d}-{int(m.group(di)):02d}"
+            if iso not in allowed.dates:
+                result.unverified.append({"field": field_name, "text": m.group(0)})
+        text = rx.sub(blank, text)
+
+    clocks = list(_CLOCK_RE.finditer(text))
+    for i, m in enumerate(clocks):
         hh, mm = int(m.group(1)), int(m.group(2))
         if hh > 23 or mm > 59:
             continue
+        half = m.group(4)
+        if not half and i + 1 < len(clocks) and clocks[i + 1].group(4) and \
+                _CLOCK_RANGE_RE.fullmatch(text[m.end():clocks[i + 1].start()]):
+            half = clocks[i + 1].group(4)
+        if half and hh <= 12:
+            hh = (hh % 12) + (12 if half.lower() == "p" else 0)
         result.checked += 1
         if not allowed.clock_ok(hh * 60 + mm):
             result.unverified.append({"field": field_name, "text": m.group(0)})
