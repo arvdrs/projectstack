@@ -5,8 +5,9 @@ test plans with automatic correlation, runs them, and analyses the results.
 
 - Docker, with everything included: `docker compose up -d --build`, then open http://localhost:6292.
   See [Run with Docker](#run-with-docker).
-- Web app: `cd projectstack/ui-web && ./start.sh`, then open http://localhost:6292
-- CLI: `pip install -e .`, then `pstack --help`
+- Web app: `source .venv/bin/activate && cd projectstack/ui-web && ./start.sh`, then open
+  http://localhost:6292. See [Run it directly](#run-it-directly) for creating `.venv` once.
+- CLI: in the same virtual environment, `pstack --help`
 
 ## Run with Docker
 
@@ -168,6 +169,28 @@ PSTACK_CLICKHOUSE_URL=clickhouse://user:password@clickhouse.example.internal:812
   container's start-up step, which runs commands as your user. `exec` runs them as root, and
   files root creates in the data volume are then read-only for the app.
 
+## Run it directly
+
+Without Docker you need Python 3.10 or later, Node 18, Java 11 with JMeter 5.6 on the `PATH`, and,
+for results analysis, the local ClickHouse (see [Setup](#setup)).
+
+```bash
+# Once: a virtual environment with the exact package versions
+python3 -m venv .venv
+.venv/bin/pip install --no-deps -r requirements.lock
+.venv/bin/pip install --no-deps -e .
+
+# Every time: activate it, then start the API (port 8001) and the web app
+source .venv/bin/activate
+cd projectstack/ui-web && ./start.sh          # open http://localhost:6292
+```
+
+`start.sh` runs whichever `python3` comes first on the `PATH`, so activate the virtual environment
+first; with the system Python the API is missing packages and Analyse Results cannot reach
+ClickHouse. On Debian and Ubuntu, `python3 -m venv` needs the `python3-venv` package
+(`sudo apt install python3-venv`). When an OS upgrade changes the Python version (Ubuntu 24.04 moves
+from 3.10 to 3.12), delete `.venv` and create it again.
+
 ## Results analysis
 
 `pstack analyze` loads a JMeter result file (JTL) into ClickHouse, finds the
@@ -217,8 +240,8 @@ the raw samples; nothing is estimated by a model.
   slowdowns they coincide with. See [Server metrics from AWS and Azure](#server-metrics-from-aws-and-azure).
 
 Both need the local ClickHouse (below); the page shows the command to start it when it is not
-running. Nothing is sent to an AI service unless you click **AI summary**, tick **AI narrative**
-for a report, or ask a question.
+running. Nothing is sent to an AI service unless you choose **With AI** in Performance Highlights &
+Observations, tick **AI narrative** for a report, or ask a question.
 
 ### Setup
 
@@ -338,6 +361,14 @@ the busiest ones and merges timeline buckets (highest p95 of each group, error
 rate recomputed from counts — percentiles are never averaged), listing what was
 cut under `truncated`.
 
+Statistics cover the steady state, except where named otherwise: the timeline and top errors cover the
+whole run, and so do `run_samples` and `run_errors` on each label (for quotas and daily limits). The
+`steady` block keeps the untrimmed plateau too (`plateau_start_ms`, `plateau_end_ms`), and the
+`baseline` block lists the labels that improved (`improvements`) next to the counts. Runs analysed
+before these were added lack them: their load profile is worked out from the trimmed window, and
+gains against a baseline are not reported until the run is analysed again. Next to `findings.json`,
+`context.json` holds the run's test context (region, test type and notes) when one was saved.
+
 ### Reports
 
 ```bash
@@ -350,18 +381,18 @@ pstack report runs/…/findings.json --out -        # from a published artifact,
 
 A report is built from the run's `findings.json` alone, so it needs no database
 and CI can render it from published artifacts. The **technical** report has the
-verdict and SLA checks, a timeline chart (active users, throughput, p95 and error
+verdict and SLA checks, the Performance Highlights & Observations, a timeline chart (active users, throughput, p95 and error
 rate as four panels on one time axis, with finding windows and the steady state
 shaded; hover for values, or open the table under it), per-transaction and
 per-request tables, every finding with its evidence, likely root causes ranked by
 confidence, recommended next tests and the top errors. The **executive** summary
-is one page: verdict, headline, four figures, key points, business impact and the
-recommended action. HTML reports are single self-contained files (no external
-assets) and follow the system's light or dark mode.
+is one page: verdict, headline, four figures, the Performance Highlights &
+Observations, business impact and the recommended action. HTML reports are single
+self-contained files (no external assets) and follow the system's light or dark mode.
 
 The detectors decide; the AI only explains. The narrative text (summary,
 timeline observations, what each finding means, root causes, next tests — or the
-headline and key points for the executive summary) is written by the AI provider
+headline, business impact and recommended action for the executive summary) is written by the AI provider
 configured for reports, which receives `findings.json` and nothing else (no raw
 samples, request or response data). It answers in JSON that fills
 fixed slots in the template, so it cannot change the findings, the verdict or the
@@ -371,7 +402,8 @@ tables.
 `findings.json`, and every number in its answer is then checked against the
 document (allowing rounding, ms→s and s→min conversions, and differences or
 ratios of two values it contains; label names, the run id and tag are ignored, and
-clock times and `t+…` offsets are checked against the run's timestamps). Numbers
+dates (2026-10-28 or October 28, 2026), clock times (09:17 or 08:09 - 09:28 AM) and
+`t+…` offsets are checked against the run's timestamps). Numbers
 that do not match are listed at the top of the report under "Check these figures".
 With `--strict-numbers` the model is asked once to correct them, and if any remain
 the command fails with exit code 3 and writes nothing.
@@ -383,6 +415,28 @@ narrative is saved as `narrative_<audience>.json` in the run's folder, together
 with the provider, model, prompt version, token usage and the number-check result,
 and reused while `findings.json` and the prompt are unchanged (`--fresh` asks
 again), so rendering the other format costs nothing.
+
+**Performance Highlights & Observations** in a report follow the same rules: with
+`--no-llm`, or without an AI provider, rules write them; otherwise the AI provider
+rewrites them in report style using the run's test context. That is `context.json`
+in the run's folder (the web app writes it), or else the latest one saved for a run
+of the same scenario. To give a context without the web app, as in CI, write the
+file yourself:
+
+```json
+{
+  "region": "us-east-1",
+  "test_type": "",
+  "notes": "/api/orders/sync is the CRM order-sync integration; optimised since the last run.\nThe lead API has a quota of 1,000 leads per day."
+}
+```
+
+An empty `test_type` is worked out from the load profile (incremental load test,
+smoke test and so on). The AI gets `findings.json`, the computed figures and the
+notes, and numbers it takes from the notes pass the number check. The statistics
+list is always computed, never AI-written. The AI version is saved as
+`narrative_highlights.json` (prompt `report_highlights`) and reused while
+`findings.json`, the context and the prompt are unchanged.
 
 | Exit code | Meaning |
 |---|---|
