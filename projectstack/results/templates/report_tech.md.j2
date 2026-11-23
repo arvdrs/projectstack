@@ -75,7 +75,9 @@ Baseline run `{{ baseline.run_id }}`{% if baseline.tag %} ({{ baseline.tag }}){%
 {% endfor %}
 
 {% endfor %}
+{% with rel = server_relation %}{% include "server_relation.md.j2" %}{% endwith %}
 {% endif %}
+{% include "screenshots.md.j2" %}
 ## Timeline
 
 {% for o in n.timeline %}

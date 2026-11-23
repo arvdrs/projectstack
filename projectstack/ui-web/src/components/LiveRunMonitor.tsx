@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Square, Users, Activity, Timer, AlertTriangle, Gauge, Hash } from 'lucide-react'
 import type { LiveSnapshot, LivePoint } from '../api/client'
+import { useTheme } from '../theme'
 
 // ---------------------------------------------------------------------------
 // Phase + progress
@@ -67,6 +68,7 @@ function TrafficCanvas({ snapshot }: { snapshot: LiveSnapshot }) {
   const latest = useRef(snapshot)
   latest.current = snapshot
   const [reducedMotion] = useState(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false)
+  const { theme } = useTheme()
 
   // Requests per animated dot — keeps the animation readable at high throughput
   const MAX_DOTS_PER_SEC = 45
@@ -84,7 +86,8 @@ function TrafficCanvas({ snapshot }: { snapshot: LiveSnapshot }) {
       muted: cssVar('--text-muted', '#8a8a8a'),
       text: cssVar('--text-secondary', '#a3a3a3'),
       primary: cssVar('--text-primary', '#f5f5f5'),
-      line: 'rgba(255,255,255,0.08)',
+      line: `rgba(${cssVar('--fg-rgb', '255, 255, 255')},0.08)`,
+      wash: `rgba(${cssVar('--fg-rgb', '255, 255, 255')},0.06)`,
       surface: cssVar('--bg-surface', '#161515'),
     }
     let width = 0, height = 0
@@ -172,7 +175,7 @@ function TrafficCanvas({ snapshot }: { snapshot: LiveSnapshot }) {
       ctx.beginPath(); ctx.roundRect(server.x, server.y, server.w, server.h, 14); ctx.fill(); ctx.stroke()
       for (let k = 0; k < 3; k++) {
         const y = server.y + 22 + k * 22
-        ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.beginPath(); ctx.roundRect(server.x + 14, y, server.w - 28, 12, 4); ctx.fill()
+        ctx.fillStyle = colors.wash; ctx.beginPath(); ctx.roundRect(server.x + 14, y, server.w - 28, 12, 4); ctx.fill()
         ctx.fillStyle = colors.req; ctx.globalAlpha = 0.25 + serverHeat * 0.75 * (0.6 + 0.4 * Math.sin(now / 120 + k))
         ctx.beginPath(); ctx.arc(server.x + server.w - 22, y + 6, 3, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1
       }
@@ -211,7 +214,7 @@ function TrafficCanvas({ snapshot }: { snapshot: LiveSnapshot }) {
     }
     raf = requestAnimationFrame(frame)
     return () => { cancelAnimationFrame(raf); ro.disconnect() }
-  }, [reducedMotion])
+  }, [reducedMotion, theme])  // colours are read when drawing starts, so start again on a theme change
 
   return (
     <div ref={wrapRef} style={{ position: 'relative', width: '100%' }}>
@@ -312,7 +315,7 @@ function LiveLineChart({ title, points, series, height = 150 }: {
           role="img" aria-label={`${title} over the last ${points.length} seconds`} style={{ display: 'block', touchAction: 'none' }}>
           {ticks.map(t => (
             <g key={t}>
-              <line x1={pad.l} x2={w - pad.r} y1={y(t)} y2={y(t)} stroke="rgba(255,255,255,0.07)" />
+              <line x1={pad.l} x2={w - pad.r} y1={y(t)} y2={y(t)} stroke="rgba(var(--fg-rgb),0.07)" />
               <text x={pad.l - 6} y={y(t) + 4} textAnchor="end" fontSize="10" fill="var(--text-muted)" style={{ fontVariantNumeric: 'tabular-nums' }}>
                 {series[0].format(t)}
               </text>
@@ -346,7 +349,7 @@ function LiveLineChart({ title, points, series, height = 150 }: {
           <div style={{
             position: 'absolute', top: 4, left: Math.min(x(hover) + 10, w - 150), pointerEvents: 'none',
             background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: '8px',
-            padding: '6px 9px', fontSize: '11px', color: 'var(--text-primary)', minWidth: 120, boxShadow: '0 6px 18px rgba(0,0,0,0.4)',
+            padding: '6px 9px', fontSize: '11px', color: 'var(--text-primary)', minWidth: 120, boxShadow: '0 6px 18px rgba(var(--shadow-rgb),0.4)',
           }}>
             <div style={{ color: 'var(--text-muted)', marginBottom: 3 }}>at {hp.t}s</div>
             {series.map(s => (
@@ -402,7 +405,7 @@ function EndpointTable({ labels }: { labels: LiveSnapshot['labels'] }) {
               <tr key={l.label} style={{ borderTop: '1px solid var(--border)' }}>
                 <td style={{ padding: '6px 10px', maxWidth: 220 }}>
                   <div style={{ fontFamily: 'monospace', fontSize: '11px', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={l.label}>{l.label}</div>
-                  <div style={{ height: 3, marginTop: 4, borderRadius: 2, background: 'rgba(255,255,255,0.06)' }}>
+                  <div style={{ height: 3, marginTop: 4, borderRadius: 2, background: 'rgba(var(--fg-rgb),0.06)' }}>
                     <div style={{ height: 3, borderRadius: 2, width: `${(l.avg_ms / maxAvg) * 100}%`, background: 'var(--series-1)', transition: 'width 0.5s' }} />
                   </div>
                 </td>
@@ -480,7 +483,7 @@ export default function LiveRunMonitor({ snapshot, onStop, stopping }: {
         </span>
         {progress && (
           <div style={{ flex: 1, minWidth: 200, display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div style={{ flex: 1, height: 6, borderRadius: 3, background: 'rgba(255,255,255,0.07)', overflow: 'hidden' }}>
+            <div style={{ flex: 1, height: 6, borderRadius: 3, background: 'rgba(var(--fg-rgb),0.07)', overflow: 'hidden' }}>
               <div style={{ height: '100%', width: `${progress.pct}%`, background: 'var(--accent-gradient)', borderRadius: 3, transition: 'width 0.9s linear' }} />
             </div>
             <span style={{ fontSize: '12px', color: 'var(--text-secondary)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{progress.text}</span>

@@ -1,0 +1,20 @@
+{% if rel %}
+  <h3 class="rel-title">Server metrics vs the load test</h3>
+  <ul class="plain points">{% for o in rel.observations %}<li>{{ o }}</li>{% endfor %}</ul>
+{% if audience == "tech" %}
+  {{ relation_chart(rel) }}
+  <div class="scroll"><table>
+    <thead><tr><th>Server metric</th><th>With the load (users)</th><th>With p95 response time</th><th>With errors</th><th class="n">Steady state</th><th class="n">Peak</th><th>Trend under flat load</th></tr></thead>
+    <tbody>{% for r in rel.rows %}<tr>
+      <td>{{ r.name }}</td>
+      <td>{% if r.flat %}flat{% else %}{{ rel_value(r.r_users, r.load) }}{% endif %}</td>
+      <td>{% if r.flat %}—{% else %}{{ rel_value(r.r_p95, r.with_p95) }}{% if r.p95_scope == "test" and r.r_p95 is not none %} (whole test){% endif %}{% endif %}</td>
+      <td>{{ rel_value(r.r_errors, r.with_errors) }}</td>
+      <td class="n">{{ rel_level(r.steady_avg, r.unit) }}</td>
+      <td class="n">{{ rel_level(r.peak, r.unit) }} <span class="muted">{{ r.peak_offset_s|offset }}</span></td>
+      <td>{% if r.trend %}{{ r.trend.direction }} ({{ rel_level(r.trend.from, r.unit) }} → {{ rel_level(r.trend.to, r.unit) }}){% else %}—{% endif %}</td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+{% endif %}
+  <p class="small muted">Each server metric is compared minute by minute with the test's active users, p95 response time and error rate (Pearson r; strong from {{ rel.thresholds.strong }}, moderate from {{ rel.thresholds.moderate }}). Response times are compared over the steady state, where the load is flat, so the two simply growing with the users does not count. Correlation shows what moved together, not what caused it.{% if rel.source == "screenshots" %} The server values were read off the screenshots by the AI, so they are approximate.{% endif %}</p>
+{% endif %}

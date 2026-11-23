@@ -16,7 +16,7 @@ from functools import lru_cache
 from typing import Any
 
 from projectstack.llm.base import (
-    Completion, LLMConfigError, LLMError, LLMRefusal, Provider, ToolCall, ToolSpec, ToolTurn,
+    Completion, Image, LLMConfigError, LLMError, LLMRefusal, Provider, ToolCall, ToolSpec, ToolTurn, image_label,
 )
 
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
@@ -96,9 +96,17 @@ class ClaudeProvider(Provider):
     # ------------------------------------------------------------------
 
     def complete(self, system: str, prompt: str, *, max_tokens: int = 16000,
-                 json_schema: dict | None = None, effort: str | None = None) -> Completion:
+                 json_schema: dict | None = None, effort: str | None = None,
+                 images: list[Image] | None = None) -> Completion:
+        content: Any = prompt
+        if images:
+            # Each picture after its label, then the question (Claude reads images best before the text)
+            content = [block for i, im in enumerate(images, 1) for block in (
+                {"type": "text", "text": image_label(i, im)},
+                {"type": "image", "source": {"type": "base64", "media_type": im.media_type, "data": im.b64}},
+            )] + [{"type": "text", "text": prompt}]
         kw: dict[str, Any] = {"model": self.model, "max_tokens": max_tokens,
-                              "messages": [{"role": "user", "content": prompt}]}
+                              "messages": [{"role": "user", "content": content}]}
         if system:
             kw["system"] = system
         cfg = self._output_config(effort, json_schema)

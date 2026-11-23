@@ -23,6 +23,8 @@ dl.ev dd { margin: 0; font-variant-numeric: tabular-nums; }
 .tl-wrap { position: relative; overflow-x: auto; }
 .tl { display: block; width: 100%; min-width: 560px; height: auto; font-family: inherit; }
 .tl-line { fill: none; stroke: var(--series); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.rl-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.rl-wrap { margin: 6px 0 14px; }
 .tl-dot { fill: var(--series); stroke: var(--surface); stroke-width: 2; }
 .tl-grid { stroke: var(--grid); stroke-width: 1; }
 .tl-base { stroke: var(--axis); stroke-width: 1; }
@@ -140,8 +142,11 @@ dl.ev dd { margin: 0; font-variant-numeric: tabular-nums; }
   </table></div>
   {% endfor %}
   {% if server.missing %}<p class="small muted">No data: {% for x in server.missing %}{{ x.resource }} {{ x.metric }} ({{ x.why }}){% if not loop.last %}; {% endif %}{% endfor %}.</p>{% endif %}
+  {% with rel = server_relation %}{% include "server_relation.html.j2" %}{% endwith %}
 </section>
 {% endif %}
+
+{% include "screenshots.html.j2" %}
 
 <section class="card">
   <h2>Timeline</h2>

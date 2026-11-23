@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from datetime import datetime, timedelta, timezone
 from html import escape
 from typing import Any
@@ -252,3 +253,110 @@ SCRIPT = """
   });
 })();
 """
+
+
+# ---------------------------------------------------------------------------
+# Server metrics vs the load test
+# ---------------------------------------------------------------------------
+
+REL_PANEL_H, REL_GAP, REL_TOP = 64, 36, 26
+REL_COLOURS = 8                 # --s1 … --s8 in the report template, in a fixed order
+
+
+def _metric_and_resource(name: str) -> tuple[str, str]:
+    metric, sep, resource = name.partition(" · ")
+    return (metric, resource) if sep else (name, "")
+
+
+def _server_key(resource: str) -> str:
+    """ "orders-db (RDS)" and "orders-db" are the same server: one colour for both."""
+    return re.sub(r"\s*\([^)]*\)\s*$", "", resource).strip().lower()
+
+
+def relation_svg(doc: dict[str, Any], rel: dict[str, Any] | None) -> str:
+    """The load test's active users and p95 with the server metrics under them, on one time axis.
+
+    One panel per server metric and unit (several servers' lines in one panel, named in its legend),
+    the steady state shaded in every panel, so a server spike can be read straight down against the
+    test. Static: the figures are in the table that follows.
+    """
+    lines = (rel or {}).get("lines") or []
+    pts = series(doc)
+    if not lines or not pts:
+        return ""
+    bucket = doc.get("timeline", {}).get("bucket_s", 60)
+    x0 = min(0.0, pts[0]["start"])
+    x1 = max(float(doc.get("run", {}).get("duration_s") or 0), pts[-1]["start"] + bucket)
+    plot_w = W - LEFT - RIGHT
+
+    def x(t: float) -> float:
+        return LEFT + (min(max(t, x0), x1) - x0) / ((x1 - x0) or 1) * plot_w
+
+    panels: list[dict[str, Any]] = [
+        {"title": "Active users (test)", "unit": "", "floor": 1,
+         "lines": [{"name": "", "colour": "var(--ink-2)", "points": [(p["t"], p["users"]) for p in pts]}]},
+        {"title": "p95 response time (test, ms)", "unit": "ms", "floor": 10,
+         "lines": [{"name": "", "colour": "var(--ink-2)", "points": [(p["t"], p["p95"]) for p in pts]}]},
+    ]
+    groups: dict[tuple[str, str], dict[str, Any]] = {}
+    slots: dict[str, int] = {}                       # server → colour, in order of first appearance
+    for line in lines:
+        metric, resource = _metric_and_resource(line["name"])
+        k = slots.setdefault(_server_key(resource or line["name"]), len(slots))
+        g = groups.setdefault((metric, line["unit"]), {
+            "title": f"{metric} ({line['unit']})" if line["unit"] else metric, "unit": line["unit"],
+            "floor": 10 if line["unit"] == "%" else 1, "lines": []})
+        g["lines"].append({"name": resource or line["name"], "colour": f"var(--s{k % REL_COLOURS + 1})",
+                           "points": [tuple(p) for p in line["points"]]})
+    panels += list(groups.values())
+
+    steady = doc.get("steady") or {}
+    s0, s1 = steady.get("start_offset_s"), steady.get("end_offset_s")
+    height = REL_TOP + len(panels) * REL_PANEL_H + (len(panels) - 1) * REL_GAP + AXIS_H
+    parts: list[str] = []
+    for k, panel in enumerate(panels):
+        y0 = REL_TOP + k * (REL_PANEL_H + REL_GAP)
+        top = _nice(max((v for ln in panel["lines"] for _, v in ln["points"]), default=0), panel["floor"])
+
+        def y(v: float) -> float:
+            return y0 + REL_PANEL_H - (max(v, 0) / top) * REL_PANEL_H
+
+        g = [f'<text class="tl-title" x="{LEFT}" y="{y0 - 10}">{escape(panel["title"])}</text>']
+        named = [ln for ln in panel["lines"] if ln["name"]]
+        lx = W - RIGHT
+        for ln in reversed(named):          # legend, right to left above the panel
+            label = ln["name"] if len(ln["name"]) <= 28 else ln["name"][:27] + "…"
+            lx -= 20 + 6.2 * len(label)
+            g.append(f'<line x1="{lx:.1f}" x2="{lx + 14:.1f}" y1="{y0 - 14}" y2="{y0 - 14}" '
+                     f'style="stroke:{ln["colour"]};stroke-width:2"/>'
+                     f'<text class="tl-tick" x="{lx + 18:.1f}" y="{y0 - 10}">{escape(label)}</text>')
+            lx -= 12
+        if s0 is not None and s1 is not None and s1 > s0:
+            g.append(f'<rect class="tl-band-steady" x="{x(s0):.1f}" y="{y0}" width="{x(s1) - x(s0):.1f}" '
+                     f'height="{REL_PANEL_H}"/>')
+        for frac in (0, 0.5, 1):
+            yy = y(top * frac)
+            g.append(f'<line class="tl-{"base" if frac == 0 else "grid"}" x1="{LEFT}" x2="{W - RIGHT}" '
+                     f'y1="{yy:.1f}" y2="{yy:.1f}"/>')
+            g.append(f'<text class="tl-tick" x="{LEFT - 8}" y="{yy + 4:.1f}" text-anchor="end">{_tick(top * frac)}</text>')
+        for ln in panel["lines"]:
+            coords = [(x(t), y(v)) for t, v in ln["points"] if v is not None]
+            if len(coords) == 1:
+                g.append(f'<circle cx="{coords[0][0]:.1f}" cy="{coords[0][1]:.1f}" r="3" style="fill:{ln["colour"]}"/>')
+            elif coords:
+                d = "M" + " L".join(f"{cx:.1f},{cy:.1f}" for cx, cy in coords)
+                g.append(f'<path class="rl-line" d="{d}" style="stroke:{ln["colour"]}"/>')
+        parts.append(f'<g>{"".join(g)}</g>')
+
+    span_min = (x1 - x0) / 60
+    step = next((s for s in (1, 2, 5, 10, 15, 30, 60, 120, 240) if span_min / s <= 8), 480)
+    axis_y = REL_TOP + len(panels) * REL_PANEL_H + (len(panels) - 1) * REL_GAP
+    t = math.ceil(x0 / (step * 60)) * step * 60
+    while t <= x1:
+        parts.append(f'<text class="tl-tick" x="{x(t):.1f}" y="{axis_y + 18}" text-anchor="middle">'
+                     f'{_minutes(t, step)}</text>')
+        t += step * 60
+    names = ", ".join(sorted({p["title"] for p in panels[2:]}))
+    return (f'<div class="tl-wrap rl-wrap"><svg class="tl" viewBox="0 0 {W} {height}" role="img" '
+            f'aria-label="Active users and p95 response time of the test, with {escape(names)} under them on the same '
+            f'time axis">{"".join(parts)}</svg></div>')

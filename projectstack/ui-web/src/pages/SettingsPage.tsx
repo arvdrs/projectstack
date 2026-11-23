@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react'
-import { Eye, EyeOff, Save, CheckCircle, AlertCircle, Terminal, Sliders, Loader2, Cpu, Activity, Mail, ShieldCheck, Layers, Upload, Trash2, Cloud } from 'lucide-react'
-import { getSettings, updateSettings, verifyGmail, getRulePacks, uploadRulePack, deleteRulePack, getJmeterInfo, checkCloud, type Settings, type RulePack, type JmeterInfo } from '../api/client'
+import { useState, useEffect, useRef } from 'react'
+import { Eye, EyeOff, Save, CheckCircle, AlertCircle, Terminal, Sliders, Loader2, Cpu, Activity, Mail, ShieldCheck, Layers, Upload, Trash2, Cloud, Palette, Moon, Sun, Monitor, FileType, Download } from 'lucide-react'
+import { useTheme, type ThemePref } from '../theme'
+import { getSettings, updateSettings, verifyGmail, getRulePacks, uploadRulePack, deleteRulePack, getJmeterInfo, checkCloud, type Settings, type RulePack, type JmeterInfo, getReportTemplate, uploadReportTemplate, deleteReportTemplate, reportTemplateStarterUrl, type ReportTemplateState } from '../api/client'
 
 // ---------------------------------------------------------------------------
 // Provider definitions (mirrors llm_router.py PROVIDERS)
@@ -10,7 +11,7 @@ const PROVIDER_OPTIONS = [
   {
     id: 'groq',
     label: 'Groq',
-    subtitle: 'Llama 3.3 70B',
+    subtitle: 'GPT-OSS 120B',
     tier: 'free' as const,
     desc: 'Free tier · ~300 req/day',
     link: 'https://console.groq.com',
@@ -77,7 +78,7 @@ function Toast({ msg, type }: { msg: string; type: 'success' | 'error' }) {
       background: type === 'success' ? 'rgba(35,134,54,0.95)' : 'rgba(var(--danger-rgb),0.95)',
       border: `1px solid ${type === 'success' ? 'var(--accent)' : 'var(--danger)'}`,
       color: '#fff', fontSize: '14px', fontWeight: 500,
-      boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+      boxShadow: '0 8px 24px rgba(var(--shadow-rgb),0.4)',
       animation: 'slideUp 0.3s ease-out',
     }}>
       {type === 'success' ? <CheckCircle size={16} /> : <AlertCircle size={16} />}
@@ -96,7 +97,7 @@ function Section({ icon: Icon, title, description, children }: {
     <div style={{
       background: 'var(--glass), var(--bg-elevated)', border: '1px solid var(--border)',
       borderRadius: '20px', padding: '32px', marginBottom: '20px',
-      boxShadow: '0 20px 40px -24px rgba(0,0,0,0.6)',
+      boxShadow: '0 20px 40px -24px rgba(var(--shadow-rgb),0.6)',
     }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px', marginBottom: '24px' }}>
         <div style={{
@@ -241,7 +242,7 @@ function CloudCheckButton({ provider, save }: { provider: 'aws' | 'azure'; save:
     <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
       <button type="button" onClick={run} disabled={state.busy} style={{
         display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '8px 16px', borderRadius: '999px', fontSize: '13px',
-        border: '1px solid var(--border-strong)', background: 'rgba(255,255,255,0.05)', color: 'var(--text-primary)', cursor: 'pointer',
+        border: '1px solid var(--border-strong)', background: 'rgba(var(--fg-rgb),0.05)', color: 'var(--text-primary)', cursor: 'pointer',
       }}>
         {state.busy ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> : <Cloud size={13} />} Save and test {provider === 'aws' ? 'AWS' : 'Azure'} sign-in
       </button>
@@ -313,7 +314,7 @@ function RulePacksSection() {
               <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>{p.name}</span>
               <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{p.rule_count} rule{p.rule_count !== 1 ? 's' : ''}</span>
               <span style={{ fontSize: '10px', fontWeight: 700, padding: '1px 6px', borderRadius: '4px', letterSpacing: '0.04em',
-                background: p.source === 'user' ? 'rgba(var(--info-rgb),0.12)' : 'rgba(255,255,255,0.05)',
+                background: p.source === 'user' ? 'rgba(var(--info-rgb),0.12)' : 'rgba(var(--fg-rgb),0.05)',
                 color: p.source === 'user' ? 'var(--info)' : 'var(--text-muted)', border: '1px solid var(--border)' }}>
                 {p.source === 'user' ? 'CUSTOM' : 'BUILT-IN'}
               </span>
@@ -462,6 +463,11 @@ export default function SettingsPage() {
 
       <form onSubmit={handleSave}>
 
+        {/* ── Appearance (saved in this browser straight away) ─────── */}
+        <Section icon={Palette} title="Appearance" description="Light or dark, for this browser. Applies straight away; no need to save.">
+          <AppearancePicker />
+        </Section>
+
         {/* ── AI Provider ──────────────────────────────────────────── */}
         <Section icon={Cpu} title="AI Provider" description="Select the LLM used for Pass 6 dynamic value detection">
 
@@ -502,7 +508,7 @@ export default function SettingsPage() {
                       fontSize: '9px', fontWeight: 700, padding: '2px 6px', borderRadius: '4px',
                       letterSpacing: '0.5px',
                       background: isFree ? 'rgba(var(--accent-rgb),0.15)' : 'rgba(var(--warning-rgb),0.15)',
-                      color: isFree ? 'var(--success)' : '#d2991a',
+                      color: isFree ? 'var(--success)' : 'var(--c-yellow)',
                       border: `1px solid ${isFree ? 'rgba(var(--accent-rgb),0.3)' : 'rgba(var(--warning-rgb),0.3)'}`,
                     }}>
                       {isFree ? 'FREE' : 'PAID'}
@@ -544,7 +550,7 @@ export default function SettingsPage() {
               </Field>
               <div style={{
                 padding: '12px 14px', borderRadius: '12px', marginTop: '4px',
-                background: 'rgba(110,118,129,0.06)', border: '1px solid var(--border)',
+                background: 'rgba(var(--fg-rgb),0.04)', border: '1px solid var(--border)',
                 fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.7, fontFamily: 'var(--font-mono)',
               }}>
                 # Install / update Ollama<br />
@@ -615,7 +621,7 @@ export default function SettingsPage() {
           )}
           <div style={{
             padding: '12px 14px', borderRadius: '12px',
-            background: 'rgba(110,118,129,0.06)', border: '1px solid var(--border)',
+            background: 'rgba(var(--fg-rgb),0.04)', border: '1px solid var(--border)',
             fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.7, fontFamily: 'var(--font-mono)',
           }}>
             # macOS: brew install jmeter<br />
@@ -665,6 +671,12 @@ export default function SettingsPage() {
 
         {/* ── Cloud monitoring (server metrics) ────────────────────── */}
         <div id="cloud" style={{ scrollMarginTop: '96px' }}>
+        <div id="report-template" style={{ scrollMarginTop: '90px' }}>
+          <Section icon={FileType} title="Report template (Word)" description="Your company's Word template for the Performance report download">
+            <ReportTemplatePicker />
+          </Section>
+        </div>
+
         <Section icon={Cloud} title="Cloud Monitoring" description="Read server metrics from AWS CloudWatch and Azure Monitor into results analysis">
           <p style={{ fontSize: '13px', color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: '18px' }}>
             Read-only. Leave the keys empty to use this machine's own sign-in: an AWS CLI profile, SSO session or
@@ -728,7 +740,7 @@ export default function SettingsPage() {
           </Field>
           <div style={{
             padding: '12px 14px', borderRadius: '12px',
-            background: 'rgba(110,118,129,0.06)', border: '1px solid var(--border)',
+            background: 'rgba(var(--fg-rgb),0.04)', border: '1px solid var(--border)',
             fontSize: '13px', color: 'var(--text-muted)', lineHeight: 1.6,
           }}>
             When set, the generated JMX includes an InfluxDB Backend Listener that pushes per-request
@@ -766,7 +778,7 @@ export default function SettingsPage() {
               disabled={verifying || !form.gmail_address || !form.gmail_app_password}
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: '7px', padding: '9px 18px', borderRadius: '999px',
-                border: '1px solid var(--border-strong)', background: 'rgba(255,255,255,0.05)', color: 'var(--text-primary)',
+                border: '1px solid var(--border-strong)', background: 'rgba(var(--fg-rgb),0.05)', color: 'var(--text-primary)',
                 fontSize: '13px', fontWeight: 500,
                 cursor: verifying || !form.gmail_address || !form.gmail_app_password ? 'not-allowed' : 'pointer',
                 opacity: verifying || !form.gmail_address || !form.gmail_app_password ? 0.5 : 1,
@@ -783,7 +795,7 @@ export default function SettingsPage() {
           </div>
           <div style={{
             marginTop: '16px', padding: '12px 14px', borderRadius: '12px',
-            background: 'rgba(110,118,129,0.06)', border: '1px solid var(--border)',
+            background: 'rgba(var(--fg-rgb),0.04)', border: '1px solid var(--border)',
             fontSize: '13px', color: 'var(--text-muted)', lineHeight: 1.6,
           }}>
             Mail is sent through Gmail's SMTP server (smtp.gmail.com) from this machine. The app password is stored
@@ -829,6 +841,137 @@ export default function SettingsPage() {
           to   { transform: translateY(0);    opacity: 1 }
         }
       `}</style>
+    </div>
+  )
+}
+
+const APPEARANCE: { key: ThemePref; label: string; hint: string; Icon: typeof Sun }[] = [
+  { key: 'dark', label: 'Dark', hint: 'The default', Icon: Moon },
+  { key: 'light', label: 'Light', hint: 'White background', Icon: Sun },
+  { key: 'system', label: 'Match system', hint: 'Follows your OS setting', Icon: Monitor },
+]
+
+function AppearancePicker() {
+  const { pref, theme, setPref } = useTheme()
+  return (
+    <div role="radiogroup" aria-label="Appearance" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px' }}>
+      {APPEARANCE.map(({ key, label, hint, Icon }) => {
+        const on = pref === key
+        return (
+          <button key={key} type="button" role="radio" aria-checked={on} onClick={() => setPref(key)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '12px', padding: '14px 16px', borderRadius: '14px', cursor: 'pointer', textAlign: 'left',
+              border: `1px solid ${on ? 'var(--accent)' : 'var(--border)'}`,
+              background: on ? 'rgba(var(--accent-rgb),0.07)' : 'var(--bg-surface)', color: 'var(--text-primary)',
+            }}>
+            <span style={{ width: 34, height: 34, borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+              background: on ? 'var(--accent-gradient)' : 'rgba(var(--fg-rgb),0.06)', color: on ? '#fff' : 'var(--text-secondary)' }}>
+              <Icon size={16} />
+            </span>
+            <span>
+              <span style={{ display: 'block', fontSize: '14px', fontWeight: 600 }}>{label}</span>
+              <span style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)' }}>
+                {key === 'system' && on ? `Now ${theme}` : hint}
+              </span>
+            </span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/** The company Word template the Performance report is built in: upload, replace, remove, and what it contains. */
+function ReportTemplatePicker() {
+  const [state, setState] = useState<ReportTemplateState | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [confirm, setConfirm] = useState(false)
+  const input = useRef<HTMLInputElement>(null)
+
+  useEffect(() => { getReportTemplate().then(setState).catch(e => setError(e instanceof Error ? e.message : String(e))) }, [])
+  useEffect(() => {                                   // arriving from a link to #report-template
+    if (state && window.location.hash === '#report-template') document.getElementById('report-template')?.scrollIntoView({ behavior: 'smooth' })
+  }, [state])
+
+  const run = async (job: () => Promise<ReportTemplateState>) => {
+    setBusy(true); setError('')
+    try { setState(await job()) } catch (e) { setError(e instanceof Error ? e.message : String(e)) } finally { setBusy(false); setConfirm(false) }
+  }
+
+  const t = state?.template
+  const yes = (ok: boolean, text: string, fix?: string) => (
+    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: '13px', lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+      {ok ? <CheckCircle size={14} style={{ color: 'var(--success)', flexShrink: 0, marginTop: 3 }} /> : <AlertCircle size={14} style={{ color: 'var(--warning)', flexShrink: 0, marginTop: 3 }} />}
+      <span>{text}{!ok && fix && <span style={{ color: 'var(--text-muted)' }}> · {fix}</span>}</span>
+    </div>
+  )
+  const btn: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '8px 14px', borderRadius: '999px', fontSize: '13px', fontWeight: 500, cursor: 'pointer', border: '1px solid var(--border-strong)', background: 'rgba(var(--fg-rgb),0.05)', color: 'var(--text-primary)' }
+
+  return (
+    <div style={{ display: 'grid', gap: '14px' }}>
+      <input ref={input} type="file" accept=".doc,.dot,.docx,.dotx" hidden
+        onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) run(() => uploadReportTemplate(f)) }} />
+      <p style={{ fontSize: '13.5px', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+        The <strong style={{ color: 'var(--text-primary)' }}>Performance report · Word</strong> downloads (.doc and .docx, on a run's page under Download) are built inside
+        this template: its fonts, colours, heading and table styles, cover page, header, footer and logo are kept. A paragraph
+        holding only <code>{state?.marker ?? '[[REPORT]]'}</code> marks where the report goes, and placeholders such as <code>{'{{scenario}}'}</code> are
+        filled in anywhere: cover page, header, footer, tables.
+      </p>
+
+      {t ? (
+        <div style={{ border: '1px solid var(--border)', borderRadius: '14px', padding: '14px 16px', display: 'grid', gap: '8px', background: 'var(--bg-surface)' }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <FileType size={16} style={{ color: 'var(--c-blue)' }} />
+            <strong style={{ fontSize: '14px', color: 'var(--text-primary)' }}>{t.name}</strong>
+            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{Math.max(1, Math.round(t.bytes / 1024))} KB{t.uploaded_at ? ` · added ${new Date(t.uploaded_at).toLocaleString()}` : ''}</span>
+          </div>
+          {yes(t.marker, t.marker ? 'Has the [[REPORT]] marker: the report goes there' : 'No [[REPORT]] marker', 'the report goes after the template\'s own content, on a new page')}
+          {yes(t.placeholders.length > 0, t.placeholders.length ? `Placeholders: ${t.placeholders.map(x => `{{${x}}}`).join(', ')}` : 'No placeholders', 'add {{scenario}}, {{test_date}} … where values should appear')}
+          {t.unknown.length > 0 && yes(false, `Not filled in (unknown): ${t.unknown.map(x => `{{${x}}}`).join(', ')}`, 'check the spelling against the list below')}
+          {yes(t.styles.headings, t.styles.headings ? `Heading styles found${t.auto_numbered ? ' (they number themselves, so no numbers are added)' : ''}` : 'No Heading 1/2 styles', 'headings will be bold paragraphs')}
+          {yes(t.styles.table_grid, t.styles.table_grid ? 'Table Grid style found' : 'No Table Grid style', 'tables get plain borders')}
+        </div>
+      ) : state && (
+        <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>No template yet: the Word report uses a clean built-in layout with its own cover page.</div>
+      )}
+
+      {state && (state.doc.available
+        ? yes(true, `Word 97–2003 (.doc) reports and .doc templates: LibreOffice found at ${state.doc.path}`)
+        : yes(false, 'Word 97–2003 (.doc) reports and .doc templates need LibreOffice, which is not installed', `run: ${state.doc.install}`))}
+
+      {error && <div style={{ fontSize: '13px', color: 'var(--danger)' }}>{error}</div>}
+
+      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+        <button type="button" style={{ ...btn, background: 'var(--accent-gradient)', color: '#fff', border: 'none' }} disabled={busy} onClick={() => input.current?.click()}>
+          {busy ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Upload size={14} />} {t ? 'Replace template' : 'Upload template (.doc, .docx or .dotx)'}
+        </button>
+        <a href={reportTemplateStarterUrl} style={{ ...btn, textDecoration: 'none' }} title="A plain template with a cover page, header, footer, placeholders and the marker, to restyle with your branding">
+          <Download size={14} /> Starter template
+        </a>
+        {t && (confirm ? (
+          <>
+            <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Remove it? Word reports go back to the built-in layout.</span>
+            <button type="button" style={{ ...btn, color: 'var(--danger)', borderColor: 'rgba(var(--danger-rgb),0.4)' }} onClick={() => run(deleteReportTemplate)}>Remove</button>
+            <button type="button" style={btn} onClick={() => setConfirm(false)}>Keep</button>
+          </>
+        ) : (
+          <button type="button" style={btn} onClick={() => setConfirm(true)}><Trash2 size={14} /> Remove</button>
+        ))}
+      </div>
+
+      {state && (
+        <details>
+          <summary style={{ cursor: 'pointer', fontSize: '13px', color: 'var(--text-secondary)' }}>Placeholders you can use</summary>
+          <div style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', gap: '4px 16px', marginTop: '8px', fontSize: '12.5px' }}>
+            {Object.entries(state.placeholders).map(([k, v]) => (
+              <div key={k} style={{ display: 'contents' }}>
+                <code style={{ color: 'var(--text-primary)' }}>{`{{${k}}}`}</code><span style={{ color: 'var(--text-muted)' }}>{v}</span>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
     </div>
   )
 }

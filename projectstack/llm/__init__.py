@@ -5,7 +5,7 @@ versioned prompt templates. Used by correlation, reports and the ask agent.
 """
 
 from projectstack.llm.base import (  # noqa: F401
-    Completion, LLMConfigError, LLMError, LLMRefusal, Provider, ToolCall, ToolSpec, ToolTurn,
+    Completion, Image, LLMConfigError, LLMError, LLMRefusal, Provider, ToolCall, ToolSpec, ToolTurn,
 )
 from projectstack.llm.prompts import Prompt, load_prompt  # noqa: F401
 from projectstack.llm.registry import provider_for_task, provider_named, resolve  # noqa: F401

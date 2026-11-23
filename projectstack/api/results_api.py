@@ -234,7 +234,8 @@ def _findings(folder: Path) -> dict[str, Any]:
     path = folder / "findings.json"
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"findings.json for this run is missing from {folder}")
-    return json.loads(path.read_text())
+    from projectstack.results import jmeter_stats
+    return jmeter_stats.ensure_total(json.loads(path.read_text()), folder, _db)
 
 
 def _cached_ai(folder: Path, audience: str, doc: dict) -> dict[str, Any] | None:
@@ -249,6 +250,23 @@ def _cached_ai(folder: Path, audience: str, doc: dict) -> dict[str, Any] | None:
         return None
     return {"content": saved["content"], "provider": saved.get("provider"), "prompt": saved.get("prompt"),
             "numbers": saved.get("numbers"), "generated_at": saved.get("generated_at")}
+
+
+def _download_name(folder: Path, run_id: str, kind: str, ext: str) -> str:
+    """"Checkout-load-test_20261117-0441_technical-report.html": the scenario first, so saved files sort by test."""
+    try:
+        scenario = json.loads((folder / "findings.json").read_text())["run"].get("scenario", "")
+    except (OSError, ValueError, KeyError):
+        scenario = ""
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", scenario).strip("-._")[:60]
+    return f"{slug + '_' if slug else ''}{run_id}_{kind}.{ext}"
+
+
+def _themed(html: str, theme: str | None) -> HTMLResponse:
+    """A report page in the web app's light or dark mode (the saved file keeps following the system)."""
+    if theme in ("light", "dark"):
+        html = html.replace('<html lang="en">', f'<html lang="en" data-theme="{theme}">', 1)
+    return HTMLResponse(html)
 
 
 def observations(doc: dict[str, Any]) -> dict[str, Any]:
@@ -346,11 +364,13 @@ async def ai_observations(run_ref: str, body: AiRequest) -> dict[str, Any]:
 
 @router.get("/runs/{run_ref}/report")
 async def run_report(run_ref: str, audience: str = Query("tech", pattern="^(tech|exec)$"),
-                     format: str = Query("html", pattern="^(html|md)$"), ai: bool = False,
-                     download: bool = False):
+                     format: str = Query("html", pattern="^(html|md|docx|doc)$"), ai: bool = False,
+                     download: bool = False, theme: str | None = Query(None, pattern="^(light|dark)$")):
     """The technical or executive report. Without ai, the rule-based narrative (nothing leaves the machine)."""
     from projectstack.results.report import ReportError, build_report
     run_id, folder = _resolve(run_ref)
+    if format in ("doc", "docx"):                # the performance report in Word, in the company template
+        return await _word_report(run_id, folder, ai, format)
     # Kept apart from the CLI's report_<audience>.<format> so the web app never overwrites those
     out = folder / "web" / f"report_{audience}{'_ai' if ai else ''}.{format}"
     try:
@@ -359,9 +379,70 @@ async def run_report(run_ref: str, audience: str = Query("tech", pattern="^(tech
     except ReportError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     if format == "html" and not download:
-        return HTMLResponse(out.read_text(encoding="utf-8"))
+        return _themed(out.read_text(encoding="utf-8"), theme)
     media = "text/html" if format == "html" else "text/markdown"
-    return FileResponse(out, media_type=media, filename=f"{run_id}_{audience}.{format}")
+    kind = "technical-report" if audience == "tech" else "executive-summary"
+    return FileResponse(out, media_type=media, filename=_download_name(folder, run_id, kind, format))
+
+
+DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+WORD_TYPES = {"docx": DOCX_TYPE, "doc": "application/msword"}
+
+
+async def _word_report(run_id: str, folder: Path, ai: bool, ext: str = "docx"):
+    from projectstack.results import office, word
+    from projectstack.results.report import ReportError
+    doc = _findings(folder)
+    settings = _settings()
+    if ext == "doc" and not office.find_soffice(settings):
+        raise HTTPException(status_code=503, detail="Word 97–2003 (.doc) reports need LibreOffice, which is not "
+                            f"installed on this machine — run: {office.INSTALL_HINT}. The .docx download works without it.")
+    build = word.build_doc if ext == "doc" else word.build
+    try:
+        data, warnings = await asyncio.to_thread(build, folder, doc, settings=settings, use_llm=ai)
+    except (ReportError, word.WordError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    out = folder / "web" / f"report_performance{'_ai' if ai else ''}.{ext}"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(data)
+    headers = {"X-Report-Warnings": "; ".join(warnings)[:900].encode("ascii", "replace").decode()} if warnings else None
+    return FileResponse(out, media_type=WORD_TYPES[ext], filename=_download_name(folder, run_id, "performance-report", ext),
+                        headers=headers)
+
+
+@router.get("/report-template")
+def report_template() -> dict[str, Any]:
+    """The company Word template reports are built in (None: the built-in layout), and the placeholders it can use."""
+    from projectstack.results import office, word
+    return {"template": word.template_info(_settings()), "placeholders": word.PLACEHOLDERS, "marker": word.MARKER,
+            "doc": office.status(_settings())}
+
+
+@router.post("/report-template")
+async def upload_report_template(file: UploadFile = File(...)) -> dict[str, Any]:
+    from projectstack.results import word
+    data = await file.read(word.MAX_TEMPLATE_BYTES + 1)
+    try:
+        info = await asyncio.to_thread(word.save_template, _settings(), file.filename or "template.docx", data)
+    except word.WordError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {**report_template(), "template": info}
+
+
+@router.delete("/report-template")
+def delete_report_template() -> dict[str, Any]:
+    from projectstack.results import word
+    word.remove_template(_settings())
+    return report_template()
+
+
+@router.get("/report-template/starter")
+def starter_report_template():
+    """A plain template to brand: cover page with placeholders, header, footer and the [[REPORT]] marker."""
+    from fastapi.responses import Response
+    from projectstack.results import word
+    return Response(word.starter_template(), media_type=DOCX_TYPE,
+                    headers={"Content-Disposition": 'attachment; filename="projectstack-report-template.docx"'})
 
 
 @router.get("/runs/{run_ref}/label")
@@ -390,9 +471,21 @@ def label_list(run_ref: str) -> dict[str, Any]:
     return {"run_id": run_id, "labels": rows}
 
 
+@router.get("/runs/{run_ref}/jmeter-statistics")
+def jmeter_statistics(run_ref: str) -> dict[str, Any]:
+    """The Statistics table of JMeter's HTML report, from the run's samples (whole run, JMeter's rules)."""
+    from projectstack.results import jmeter_stats
+    run_id, folder = _resolve(run_ref)
+    try:
+        return {"run_id": run_id, **jmeter_stats.load(_db(), run_id, folder)}
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @router.get("/runs/{run_ref}/labels-report")
 async def labels_report(run_ref: str, format: str = Query("html", pattern="^(html|md)$"),
-                        limit: int = Query(40, ge=1, le=500), download: bool = False):
+                        limit: int = Query(40, ge=1, le=500), download: bool = False,
+                        theme: str | None = Query(None, pattern="^(light|dark)$")):
     """Synthesis report for the run's transactions and main requests (rule-based; no AI)."""
     from projectstack.results import labels
     run_id, folder = _resolve(run_ref)
@@ -403,9 +496,9 @@ async def labels_report(run_ref: str, format: str = Query("html", pattern="^(htm
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(text, encoding="utf-8")
     if format == "html" and not download:
-        return HTMLResponse(text)
+        return _themed(text, theme)
     return FileResponse(out, media_type="text/html" if format == "html" else "text/markdown",
-                        filename=f"{run_id}_requests_transactions.{format}")
+                        filename=_download_name(folder, run_id, "requests-and-transactions", format))
 
 
 # ---------------------------------------------------------------------------
@@ -500,6 +593,7 @@ async def fetch_server_metrics(run_ref: str, body: ServerFetch) -> dict[str, Any
 
 @router.get("/runs/{run_ref}/server-metrics")
 def get_server_metrics(run_ref: str) -> dict[str, Any]:
+    from projectstack.results import server_load
     from projectstack.results.cloud.analysis import read
     run_id, folder = _resolve(run_ref)
     doc = _findings(folder)
@@ -509,7 +603,176 @@ def get_server_metrics(run_ref: str) -> dict[str, Any]:
             "resources": (data or {}).get("resources", []), "missing": (data or {}).get("missing", []),
             "warnings": (data or {}).get("warnings", []), "fetched_at": (data or {}).get("fetched_at"),
             "steady": doc.get("steady"), "duration_s": doc["run"]["duration_s"],
+            "relation": server_load.from_cloud(data, doc),
             "findings": [{**f, "n": i} for i, f in enumerate(doc.get("findings", []), 1) if f["type"] == "server"]}
+
+
+# ---------------------------------------------------------------------------
+# Server-metric screenshots and their AI reading
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ShotJob:
+    """A screenshot reading in the background (several requests to the AI provider)."""
+    id: str
+    run_id: str
+    status: str = "running"              # running | done | failed
+    done: int = 0
+    total: int = 0
+    message: str = "Starting…"
+    error: str | None = None
+    result: dict[str, Any] | None = None
+
+    def view(self) -> dict[str, Any]:
+        return {"id": self.id, "run_id": self.run_id, "status": self.status, "done": self.done, "total": self.total,
+                "message": self.message, "error": self.error, "result": self.result}
+
+
+_shot_jobs: dict[str, ShotJob] = {}
+_shot_jobs_lock = threading.Lock()
+
+
+def _running_shot_job(run_id: str) -> ShotJob | None:
+    with _shot_jobs_lock:
+        return next((j for j in _shot_jobs.values() if j.run_id == run_id and j.status == "running"), None)
+
+
+def _shots_state(folder: Path, doc: dict[str, Any]) -> dict[str, Any]:
+    from projectstack.llm.registry import vision_choices
+    from projectstack.results import screenshots
+    job = _running_shot_job(doc["run"]["run_id"])
+    return {**screenshots.state(folder, doc, _test_context(folder, doc)), "providers": vision_choices(_settings()),
+            "job": job.view() if job else None}
+
+
+@router.get("/runs/{run_ref}/screenshots")
+def list_screenshots(run_ref: str) -> dict[str, Any]:
+    """The run's screenshots, the saved AI reading (marked stale when out of date) and the providers that can read them."""
+    run_id, folder = _resolve(run_ref)
+    return _shots_state(folder, _findings(folder))
+
+
+@router.post("/runs/{run_ref}/screenshots")
+async def add_screenshots(run_ref: str, files: list[UploadFile] = File(...)) -> dict[str, Any]:
+    """Attach screenshots (PNG, JPEG, WebP or GIF). Files that cannot be added are reported, the rest are kept."""
+    from projectstack.results import screenshots
+    run_id, folder = _resolve(run_ref)
+    doc = _findings(folder)
+    errors: list[str] = []
+    room = screenshots.MAX_FILES - len(screenshots.list_items(folder))
+    over = [f.filename or "screenshot" for f in files[max(room, 0):]]
+    for f in files[:max(room, 0)]:
+        data = await f.read(screenshots.MAX_BYTES + 1)
+        try:
+            await asyncio.to_thread(screenshots.add, folder, f.filename or "screenshot", data)
+        except screenshots.ScreenshotError as exc:
+            errors.append(str(exc))
+    if over:                                 # one message for all the files that did not fit
+        errors.append(f"{len(over)} file{'s' if len(over) > 1 else ''} not added, as a run takes up to "
+                      f"{screenshots.MAX_FILES} screenshots ({', '.join(over[:5])}{', …' if len(over) > 5 else ''}): "
+                      "remove some first")
+    if len(errors) - (1 if over else 0) + len(over) >= len(files):      # nothing was added
+        raise HTTPException(status_code=400, detail="; ".join(errors))
+    return {**_shots_state(folder, doc), "errors": errors}
+
+
+@router.get("/runs/{run_ref}/screenshots/{shot_id}/image")
+def screenshot_image(run_ref: str, shot_id: str):
+    from fastapi.responses import Response
+    from projectstack.results import screenshots
+    run_id, folder = _resolve(run_ref)
+    try:
+        data, media_type = screenshots.image(folder, shot_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Response(data, media_type=media_type,
+                    headers={"Cache-Control": "private, max-age=86400", "X-Content-Type-Options": "nosniff"})
+
+
+class CaptionRequest(BaseModel):
+    caption: str = ""
+
+
+@router.patch("/runs/{run_ref}/screenshots/{shot_id}")
+def caption_screenshot(run_ref: str, shot_id: str, body: CaptionRequest) -> dict[str, Any]:
+    from projectstack.results import screenshots
+    run_id, folder = _resolve(run_ref)
+    try:
+        screenshots.update(folder, shot_id, body.caption)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _shots_state(folder, _findings(folder))
+
+
+@router.delete("/runs/{run_ref}/screenshots/{shot_id}")
+def delete_screenshot(run_ref: str, shot_id: str) -> dict[str, Any]:
+    from projectstack.results import screenshots
+    run_id, folder = _resolve(run_ref)
+    try:
+        screenshots.remove(folder, shot_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _shots_state(folder, _findings(folder))
+
+
+class ScreenshotReadRequest(BaseModel):
+    provider: str | None = None          # "gemini", "ollama/gemma4" …; default: the screenshots task's provider
+    fresh: bool = False
+    time_zone: str = ""                  # the browser's IANA zone, as monitoring tools often show local time
+
+
+@router.post("/runs/{run_ref}/screenshots/analysis")
+def read_screenshots(run_ref: str, body: ScreenshotReadRequest) -> dict[str, Any]:
+    """Start reading the screenshots with a vision model in the background; poll the job for progress.
+
+    The screenshots go to the chosen provider with the run's timeline and notes, a few per request.
+    A reading already running for the run is returned instead of starting another.
+    """
+    from projectstack.llm.base import LLMConfigError, LLMError
+    from projectstack.llm.registry import provider_for_task
+    from projectstack.results import screenshots
+    run_id, folder = _resolve(run_ref)
+    doc = _findings(folder)
+    if not screenshots.list_items(folder):
+        raise HTTPException(status_code=400, detail="Attach at least one screenshot first")
+    try:
+        provider_for_task("screenshots", _settings(), body.provider)      # a provider that is not set up: say so now
+    except LLMConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    running = _running_shot_job(run_id)
+    if running:
+        return running.view()
+    job = ShotJob(id=secrets.token_hex(6), run_id=run_id)
+    with _shot_jobs_lock:
+        _shot_jobs[job.id] = job
+
+    def progress(done: int, total: int, message: str) -> None:
+        job.done, job.total, job.message = done, total, message
+
+    def work() -> None:
+        try:
+            job.result = screenshots.analyse(doc, folder, _test_context(folder, doc), settings=_settings(),
+                                             provider_spec=body.provider, fresh=body.fresh,
+                                             tz_name=body.time_zone[:64], progress=progress)
+            job.status = "done"
+        except (screenshots.ScreenshotError, LLMConfigError) as exc:
+            job.error, job.status = str(exc), "failed"
+        except (LLMError, ValueError) as exc:
+            job.error, job.status = f"The AI could not read the screenshots: {exc}", "failed"
+        except Exception as exc:  # noqa: BLE001 — reported to the page instead of a silent thread death
+            job.error, job.status = f"Reading the screenshots failed: {type(exc).__name__}: {exc}", "failed"
+
+    threading.Thread(target=work, name=f"screenshots-{run_id}", daemon=True).start()
+    return job.view()
+
+
+@router.get("/runs/{run_ref}/screenshots/analysis/{job_id}")
+def screenshot_reading_job(run_ref: str, job_id: str) -> dict[str, Any]:
+    with _shot_jobs_lock:
+        job = _shot_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="No such reading (the API may have restarted): start it again")
+    return job.view()
 
 
 class AskRequest(BaseModel):

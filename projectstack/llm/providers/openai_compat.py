@@ -6,7 +6,8 @@ import json
 from typing import Any
 
 from projectstack.llm.base import (
-    Completion, LLMConfigError, LLMError, LLMRefusal, Provider, ToolCall, ToolSpec, ToolTurn, schema_instruction,
+    Completion, Image, LLMConfigError, LLMError, LLMRefusal, Provider, ToolCall, ToolSpec, ToolTurn, image_label,
+    schema_instruction,
 )
 
 
@@ -14,6 +15,7 @@ class _OpenAICompat(Provider):
     key_field = ""
     base_url: str | None = None
     product = ""
+    max_retries = 1
 
     def __init__(self, settings: dict[str, str], model: str | None = None):
         super().__init__(settings, model)
@@ -21,7 +23,8 @@ class _OpenAICompat(Provider):
         if not key:
             raise LLMConfigError(f"No {self.product} API key — add {self.key_field} in Settings")
         from openai import OpenAI
-        self.client = OpenAI(api_key=key, base_url=self.base_url, timeout=120, max_retries=1)
+        # The SDK waits as long as a 429's Retry-After asks before trying again
+        self.client = OpenAI(api_key=key, base_url=self.base_url, timeout=120, max_retries=self.max_retries)
 
     def _create(self, **kw: Any):
         import openai
@@ -37,10 +40,17 @@ class _OpenAICompat(Provider):
             raise LLMError(f"Cannot reach {self.product}") from exc
 
     def complete(self, system: str, prompt: str, *, max_tokens: int = 8192,
-                 json_schema: dict | None = None, effort: str | None = None) -> Completion:
+                 json_schema: dict | None = None, effort: str | None = None,
+                 images: list[Image] | None = None) -> Completion:
         if json_schema:
             system = f"{system}\n\n{schema_instruction(json_schema)}".strip()
-        messages = ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": prompt}]
+        content: Any = prompt
+        if images:
+            content = [part for i, im in enumerate(images, 1) for part in (
+                {"type": "text", "text": image_label(i, im)},
+                {"type": "image_url", "image_url": {"url": f"data:{im.media_type};base64,{im.b64}"}},
+            )] + [{"type": "text", "text": prompt}]
+        messages = ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": content}]
         kw: dict[str, Any] = {"messages": messages, "max_tokens": max_tokens}
         if json_schema:
             kw["response_format"] = {"type": "json_object"}
@@ -86,7 +96,8 @@ class OpenAIProvider(_OpenAICompat):
 
 class GroqProvider(_OpenAICompat):
     name = "groq"
-    default_model = "llama-3.3-70b-versatile"
+    default_model = "openai/gpt-oss-120b"    # Llama 3.3 70B was retired by Groq
     key_field = "groq_api_key"
     base_url = "https://api.groq.com/openai/v1"
     product = "Groq"
+    max_retries = 4               # the free tier's tokens-per-minute limit is easy to reach with pictures

@@ -1,0 +1,33 @@
+{% if shots and (audience == "tech" or shots.analysed) %}
+<section class="card shots">
+  <h2>Server metrics from screenshots</h2>
+{% if shots.analysed %}
+{% if shots.observations %}
+  <ul class="plain points">{% for o in shots.observations %}<li>{{ o }}</li>{% endfor %}</ul>
+{% endif %}
+{% if shots.caveats %}
+  <p class="small muted">Caveats: {% for c in shots.caveats %}{{ c }}{% if not loop.last %} {% endif %}{% endfor %}</p>
+{% endif %}
+{% with rel = shots.relation %}{% include "server_relation.html.j2" %}{% endwith %}
+{% endif %}
+{% if audience == "tech" %}
+  <div class="shot-grid">
+  {% for s in shots.pictures %}
+    <figure class="shot">
+      {% if s.src %}<img src="{{ s.src }}" alt="{{ s.heading }}" loading="lazy">{% endif %}
+      <figcaption>
+        <strong>{{ s.heading }}</strong>{% if s.caption and s.caption != s.heading %} <span class="muted">· {{ s.caption }}</span>{% endif %}
+        {% if s.time_axis or s.test_on_chart %}<div class="small muted">{% if s.time_axis %}Chart shows {{ s.time_axis }}{% endif %}{% if s.time_axis and s.test_on_chart %} · {% endif %}{% if s.test_on_chart %}test {{ s.test_on_chart }}{% endif %}</div>{% endif %}
+        {% if s.covers_test == "no" %}<div class="small"><strong>The test window is not on this chart.</strong></div>{% elif s.covers_test == "partly" %}<div class="small"><strong>The chart covers only part of the test window.</strong></div>{% endif %}
+        {% if s.observations %}<ul class="plain">{% for o in s.observations %}<li>{{ o }}</li>{% endfor %}</ul>
+        {% elif shots.analysed and s.error %}<p class="small muted">Not read by the AI: {{ s.error }}</p>
+        {% elif shots.analysed and not s.readable %}<p class="small muted">The AI could not read this screenshot.</p>{% endif %}
+        {% if s.caveat %}<p class="small muted"><em>{{ s.caveat }}</em></p>{% endif %}
+      </figcaption>
+    </figure>
+  {% endfor %}
+  </div>
+{% endif %}
+  <p class="small muted">{% if shots.analysed %}Read by {{ shots.provider }}{% if shots.local %} on this machine{% endif %} from {{ shots.pictures|length }} screenshot(s) and the run's timeline. Figures about the servers are read from the images by the AI; check them against the screenshots.{% elif shots.stale %}{{ shots.pictures|length }} screenshot(s) attached. The AI reading is out of date (screenshots, captions or notes changed since) and is left out.{% else %}{{ shots.pictures|length }} screenshot(s) attached; they have not been read by the AI.{% endif %}</p>
+</section>
+{% endif %}

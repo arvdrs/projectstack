@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from projectstack.config import load_settings
+from projectstack.results import jmeter_stats
 from projectstack.results import metrics as m
 from projectstack.results import store
 from projectstack.results.db import ResultsDB, connect
@@ -164,6 +165,9 @@ def analyze_file(
         })
         doc = findings_doc.build(meta, metrics, steady_info, found, skipped, ctx.extra.get("sla_result", {"defined": False}),
                                  baseline_section(comparison, baseline, base_note))
+        # The Statistics table of JMeter's HTML report; its Total row gives the highlights' totals
+        jmeter_table = jmeter_stats.compute(db, run_id)
+        doc["jmeter_total"] = jmeter_table["total"]
         meta["verdict"] = doc["verdict"]
         if baseline:
             meta["baseline"] = {"requested": baseline, "run_id": base_id,
@@ -173,7 +177,7 @@ def analyze_file(
         meta["findings"] = {sev: sum(1 for f in found if f.severity == sev) for sev in ("critical", "warning", "info")}
         summary = metrics["overall"].get("request") or metrics["overall"].get("transaction") or {}
         store.save_run(db, run_id, status="ready", meta=meta, summary=summary, verdict=doc["verdict"])
-        artifacts = {"meta": meta, "metrics": metrics, "findings": doc}
+        artifacts = {"meta": meta, "metrics": metrics, "findings": doc, "jmeter_statistics": jmeter_table}
         if comparison:
             artifacts["comparison"] = comparison
         folder = store.write_artifacts(Path(settings["runs_dir"]), run_id, **artifacts)

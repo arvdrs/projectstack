@@ -11,6 +11,7 @@ import {
   type CloudCatalog, type CloudProvider, type CloudResource, type RunAnalysis, type ServerMetrics,
 } from '../../api/client'
 import MultiTimeline, { type Panel } from './MultiTimeline'
+import LoadRelation, { runStartMs, testPanels } from './LoadRelation'
 import { Btn, Card, CardTitle, Notice, SeverityBadge, Spinner, fieldStyle, fmtDate, fmtMs, fmtNum, fmtOffset } from './ui'
 
 const COLORS = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)', 'var(--series-5)', 'var(--series-6)', 'var(--series-7)', 'var(--series-8)']
@@ -106,10 +107,7 @@ export default function ServerMetricsCard({ analysis, onAttached }: { analysis: 
 
 function ServerCharts({ data, analysis }: { data: ServerMetrics; analysis: RunAnalysis }) {
   const panels = useMemo(() => {
-    const out: Panel[] = [{
-      title: 'Test p95 response time (ms)', fmt: v => fmtMs(v), floor: 10,
-      series: [{ name: 'test p95', color: 'var(--text-secondary)', points: analysis.timeline.points.map(p => ({ t: p.t_offset_s + analysis.timeline.bucket_s / 2, v: p.p95_ms })) }],
-    }]
+    const out: Panel[] = testPanels(analysis)
     const groups = new Map<string, typeof data.series>()
     for (const s of data.series) {
       const key = `${s.kind}|${s.unit}`
@@ -138,8 +136,12 @@ function ServerCharts({ data, analysis }: { data: ServerMetrics; analysis: RunAn
         {data.resources.length} resource(s) · fetched {fmtDate(data.fetched_at)} · {(data.summary?.period_s ?? 60) / 60}-minute values
         {data.warnings.length > 0 && <> · {data.warnings.join(' ')}</>}
       </div>
-      <MultiTimeline panels={panels} durationS={data.duration_s}
+      <MultiTimeline panels={panels} durationS={data.duration_s} clockStartMs={runStartMs(analysis)}
         band={data.steady ? { from: data.steady.start_offset_s, to: data.steady.end_offset_s, label: 'Steady state (statistics window)' } : undefined} />
+
+      <div style={{ borderTop: '1px solid var(--border)', paddingTop: '16px' }}>
+        <LoadRelation analysis={analysis} relation={data.relation} />
+      </div>
 
       {data.findings.length > 0 && (
         <div>

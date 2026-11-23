@@ -2,7 +2,7 @@
 LLM Router — routes AI-powered dynamic value detection to the configured provider.
 
 Supported providers:
-  groq    — Groq (Llama 3.3 70B)   — free tier, requires Groq API key
+  groq    — Groq (GPT-OSS 120B)    — free tier, requires Groq API key
   gemini  — Google Gemini Flash     — free tier, requires Google AI Studio key
   ollama  — Ollama (local)          — free, requires local Ollama installation
   claude  — Anthropic Claude        — paid, requires Anthropic API key
@@ -27,12 +27,12 @@ from projectstack.correlator.matching import header_get
 PROVIDERS: dict[str, dict] = {
     "groq": {
         "label": "Groq",
-        "subtitle": "Llama 3.3 70B",
+        "subtitle": "GPT-OSS 120B",
         "tier": "free",
         "description": "Free tier · ~14,400 tokens/min. Get a free key at console.groq.com",
         "key_field": "groq_api_key",
         "key_placeholder": "gsk_...",
-        "model": "llama-3.3-70b-versatile",
+        "model": "openai/gpt-oss-120b",
     },
     "gemini": {
         "label": "Gemini",
@@ -222,7 +222,68 @@ _THINKING_OPTIONS: tuple[dict | None, ...] = ({"thinkingLevel": "low"}, {"thinki
 _gemini_cooldown: dict[tuple[str, str], float] = {}
 # The model that answered the last call on this thread, and its token usage (for report provenance)
 _gemini_last = threading.local()
-_COOLDOWN_SECONDS = {"quota": 900.0, "overloaded": 120.0}
+_COOLDOWN_SECONDS = {"quota": 900.0, "overloaded": 120.0, "silent": 300.0}
+STREAM_IDLE_S = 45.0           # a streamed answer silent this long: the model is not answering
+
+
+def _gemini_probe(api_key: str, timeout: float = 20.0) -> list[str]:
+    """Ask every available model for a one-word answer at once; the ones that do not answer in time,
+    or say they are overloaded, are skipped for a while. Returns the models that answered, in order."""
+    import requests as http_lib  # noqa: PLC0415
+    from concurrent.futures import ThreadPoolExecutor
+
+    now = time.monotonic()
+    models = [m for m in _gemini_models(api_key) if _gemini_cooldown.get((api_key, m), 0) <= now]
+
+    def ping(model: str) -> bool:
+        body = {"contents": [{"role": "user", "parts": [{"text": "Reply with OK."}]}],
+                "generationConfig": {"maxOutputTokens": 64}}
+        try:
+            resp = http_lib.post(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                                 headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
+                                 json=body, timeout=(5, timeout))
+        except http_lib.exceptions.RequestException:
+            _gemini_cooldown[(api_key, model)] = time.monotonic() + _COOLDOWN_SECONDS["silent"]
+            return False
+        if resp.status_code == 429 and "quota" in resp.text.lower():
+            _gemini_cooldown[(api_key, model)] = time.monotonic() + _COOLDOWN_SECONDS["quota"]
+            return False
+        if resp.status_code in (500, 503, 504):
+            _gemini_cooldown[(api_key, model)] = time.monotonic() + _COOLDOWN_SECONDS["silent"]
+            return False
+        return resp.ok
+
+    if not models:
+        return []
+    with ThreadPoolExecutor(max_workers=len(models)) as pool:
+        answered = list(pool.map(ping, models))
+    return [m for m, ok in zip(models, answered) if ok]
+
+
+def _read_sse(resp, deadline: float) -> tuple[str, dict, str]:
+    """(text, usage, finish reason) of a streamed generateContent answer (server-sent events)."""
+    text: list[str] = []
+    usage: dict = {}
+    finish = ""
+    resp.encoding = "utf-8"            # text/event-stream has no charset, and requests would assume Latin-1
+    try:
+        for raw in resp.iter_lines(decode_unicode=True):
+            if time.monotonic() > deadline:
+                raise TimeoutError("time budget used up while the answer was arriving")
+            if not raw or not raw.startswith("data:"):
+                continue
+            try:
+                chunk = json.loads(raw[5:].strip())
+            except ValueError:
+                continue
+            usage = chunk.get("usageMetadata") or usage
+            for cand in chunk.get("candidates") or []:
+                finish = cand.get("finishReason") or finish
+                text.extend(p.get("text", "") for p in (cand.get("content") or {}).get("parts") or []
+                            if not p.get("thought"))
+    finally:
+        resp.close()
+    return "".join(text), usage, finish
 
 
 def _gemini_models(api_key: str) -> list[str]:
@@ -272,6 +333,8 @@ def _gemini_generate(
     time_budget: float = 150.0,
     json_mode: bool = False,
     pin_model: str | None = None,
+    images: list[tuple[str, str, str]] | None = None,
+    json_schema: dict | None = None,
 ) -> str:
     """
     Call the Gemini REST API directly — avoids the deprecated google-generativeai SDK.
@@ -282,6 +345,14 @@ def _gemini_generate(
     A model that is out of quota, retired or not answering is skipped for the next
     one, and the whole call is bounded by `time_budget` seconds. `json_mode` asks for a
     JSON response; `pin_model` uses that model instead of discovering the Flash models.
+    `images` are (label, media type, base64 data), sent before the prompt, each after its label.
+    `json_schema` makes the answer follow that JSON Schema (responseJsonSchema): always valid,
+    compact JSON. A model that rejects the schema is asked again without it.
+
+    Requests with images stream the answer: a model that is alive sends its first bytes within
+    seconds of finishing its thinking and keeps sending, while an overloaded one sends nothing.
+    So a stream silent for STREAM_IDLE_S moves on to the next model (and skips the silent one
+    for a while), however long a healthy answer takes.
     """
     import requests as http_lib  # noqa: PLC0415
 
@@ -291,9 +362,14 @@ def _gemini_generate(
     deadline = time.monotonic() + time_budget
     # Non-streaming answers arrive only once fully generated, so the read timeout
     # scales with the output budget (≈45 s for a short narrative, ≤90 s for big batches).
-    read_timeout = min(90.0, 20.0 + max_output_tokens / 40)
+    read_timeout = STREAM_IDLE_S if images else min(90.0, 20.0 + max_output_tokens / 40)
+    stream = bool(images)
+    parts: list[dict] = [part for label, mime, data in (images or [])
+                         for part in ({"text": label}, {"inlineData": {"mimeType": mime, "data": data}})]
+    parts.append({"text": prompt})
     errors: list[str] = []
     quota_hits = 0
+    use_schema = bool(json_schema)
     now = time.monotonic()
     all_models = [pin_model] if pin_model else _gemini_models(api_key)
     models = [m for m in all_models if _gemini_cooldown.get((api_key, m), 0) <= now] or all_models
@@ -306,25 +382,34 @@ def _gemini_generate(
             if remaining < 5:
                 raise RuntimeError(f"Gemini did not answer within {int(time_budget)}s ({'; '.join(errors) or 'no response'})")
             generation_config: dict = {"maxOutputTokens": max_output_tokens}
-            if json_mode:
+            if json_mode or use_schema:
                 generation_config["responseMimeType"] = "application/json"
+            if use_schema:
+                generation_config["responseJsonSchema"] = json_schema
             if options[option_idx]:
                 generation_config["thinkingConfig"] = options[option_idx]
-            body: dict = {"contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            body: dict = {"contents": [{"role": "user", "parts": parts}],
                           "generationConfig": generation_config}
             if system_prompt:
                 body["systemInstruction"] = {"parts": [{"text": system_prompt}]}
             try:
                 resp = http_lib.post(
-                    f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                    f"https://generativelanguage.googleapis.com/v1beta/models/{model}:"
+                    + ("streamGenerateContent?alt=sse" if stream else "generateContent"),
                     headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
                     json=body,
                     timeout=(10, min(read_timeout, remaining)),
+                    stream=stream,
                 )
             except (http_lib.exceptions.Timeout, http_lib.exceptions.ConnectionError) as exc:
                 resp = None
-                errors.append(f"{model}: {type(exc).__name__}")
+                errors.append(f"{model}: {'no answer' if stream else type(exc).__name__}")
+                if not pin_model:               # skip it for a while: the next call goes to one that answers
+                    _gemini_cooldown[(api_key, model)] = time.monotonic() + _COOLDOWN_SECONDS["silent"]
                 break                           # not answering — try the next model
+            if resp.status_code == 400 and use_schema and "schema" in resp.text.lower():
+                use_schema = False              # the model does not take this schema: plain JSON mode instead
+                continue
             if resp.status_code == 400 and options[option_idx] is not None:
                 option_idx += 1                 # thinking setting not supported by this model
                 continue
@@ -336,6 +421,20 @@ def _gemini_generate(
                 continue
             break                               # success, or overloaded (503) → next model
         if resp is None:
+            continue
+        if resp.ok and stream:
+            _gemini_thinking_ok[model] = options[option_idx] if option_idx < len(options) else None
+            try:
+                text, usage, finish = _read_sse(resp, deadline)
+            except (http_lib.exceptions.RequestException, TimeoutError) as exc:
+                errors.append(f"{model}: stopped answering ({type(exc).__name__})")
+                if not pin_model:
+                    _gemini_cooldown[(api_key, model)] = time.monotonic() + _COOLDOWN_SECONDS["silent"]
+                continue
+            _gemini_last.model, _gemini_last.usage = model, usage
+            if text.strip():
+                return text
+            errors.append(f"{model}: empty answer ({finish or 'no reason given'})")
             continue
         if resp.ok:
             _gemini_thinking_ok[model] = options[option_idx] if option_idx < len(options) else None

@@ -11,7 +11,7 @@ import { fmtOffset } from './ui'
 export interface Series { name: string; color: string; points: { t: number; v: number }[] }
 export interface Panel { title: string; subtitle?: string; fmt: (v: number) => string; floor?: number; series: Series[] }
 
-const W = 760, LEFT = 52, RIGHT = 14, PANEL_H = 74, GAP = 34, TOP = 20, AXIS_H = 24
+const W = 1000, LEFT = 52, RIGHT = 14, PANEL_H = 74, GAP = 34, TOP = 20, AXIS_H = 24
 
 function nice(v: number, floor: number): number {
   const x = Math.max(v, floor)
@@ -42,10 +42,17 @@ function tick(v: number): string {
   return Number.isInteger(v) || v >= 10 ? String(+v.toFixed(0)) : String(+v.toFixed(2))
 }
 
-export default function MultiTimeline({ panels, band, durationS }: {
+/** Local wall-clock time (HH:MM) of a point `t` seconds after `startMs`. */
+export function clockAt(startMs: number, t: number, seconds = false): string {
+  return new Date(startMs + t * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', ...(seconds ? { second: '2-digit' } : {}), hour12: false })
+}
+
+export default function MultiTimeline({ panels, band, durationS, clockStartMs }: {
   panels: Panel[]
   band?: { from: number; to: number; label: string }
   durationS?: number
+  /** When given (the run's start, epoch ms), the axis shows local clock times instead of t+ offsets */
+  clockStartMs?: number
 }) {
   const [hoverT, setHoverT] = useState<number | null>(null)
   const allT = useMemo(() => Array.from(new Set(panels.flatMap(p => p.series.flatMap(s => s.points.map(x => x.t))))).sort((a, b) => a - b), [panels])
@@ -58,9 +65,11 @@ export default function MultiTimeline({ panels, band, durationS }: {
     const spanMin = (x1 - x0) / 60
     const step = [1, 2, 5, 10, 15, 30, 60, 120, 240].find(s => spanMin / s <= 8) ?? 480
     const ticks: number[] = []
-    for (let t = Math.ceil(x0 / (step * 60)) * step * 60; t <= x1; t += step * 60) ticks.push(t)
+    // On a clock axis the ticks fall on round local minutes (13:40, 13:50 …), as on a monitoring dashboard
+    const shift = clockStartMs != null ? (((clockStartMs / 1000 - new Date(clockStartMs).getTimezoneOffset() * 60) % (step * 60)) + step * 60) % (step * 60) : 0
+    for (let t = Math.ceil((x0 + shift) / (step * 60)) * step * 60 - shift; t <= x1; t += step * 60) if (t >= x0) ticks.push(t)
     return { x0, x1, plotW, x, tops, ticks, step }
-  }, [panels, allT, durationS])
+  }, [panels, allT, durationS, clockStartMs])
 
   if (!allT.length) return <div style={{ color: 'var(--text-muted)', fontSize: '13px' }}>No timeline data.</div>
 
@@ -98,7 +107,7 @@ export default function MultiTimeline({ panels, band, durationS }: {
         </div>
       )}
       <div style={{ position: 'relative', overflowX: 'auto' }}>
-        <svg viewBox={`0 0 ${W} ${height}`} role="img" style={{ width: '100%', minWidth: '560px', height: 'auto', display: 'block' }}
+        <svg viewBox={`0 0 ${W} ${height}`} role="img" style={{ width: '100%', minWidth: '720px', height: 'auto', display: 'block' }}
           aria-label={panels.map(p => p.title).join(', ') + ' over the run'}>
           {panels.map((panel, k) => {
             const y0 = top0 + 16 + k * (PANEL_H + GAP)
@@ -119,11 +128,11 @@ export default function MultiTimeline({ panels, band, durationS }: {
                 {band && band.to > band.from && (
                   <rect x={geo.x(Math.max(geo.x0, band.from))} y={y0} height={PANEL_H}
                     width={Math.max(0, geo.x(Math.min(geo.x1, band.to)) - geo.x(Math.max(geo.x0, band.from)))}
-                    style={{ fill: 'rgba(255,255,255,0.05)' }} />
+                    style={{ fill: 'rgba(var(--fg-rgb),0.05)' }} />
                 )}
                 {[0, 0.5, 1].map(f => (
                   <g key={f}>
-                    <line x1={LEFT} x2={W - RIGHT} y1={y(top * f)} y2={y(top * f)} stroke={f === 0 ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.07)'} />
+                    <line x1={LEFT} x2={W - RIGHT} y1={y(top * f)} y2={y(top * f)} stroke={f === 0 ? 'rgba(var(--fg-rgb),0.22)' : 'rgba(var(--fg-rgb),0.07)'} />
                     <text x={LEFT - 8} y={y(top * f) + 4} fontSize="10" textAnchor="end" fill="var(--text-muted)" style={{ fontVariantNumeric: 'tabular-nums' }}>{tick(top * f)}</text>
                   </g>
                 ))}
@@ -140,7 +149,7 @@ export default function MultiTimeline({ panels, band, durationS }: {
           })}
           {geo.ticks.map(t => (
             <text key={t} x={geo.x(t)} y={axisY + 12} fontSize="10" textAnchor="middle" fill="var(--text-muted)">
-              {geo.step >= 60 ? `${Math.round(t / 3600)}h` : `${Math.round(t / 60)}m`}
+              {clockStartMs != null ? clockAt(clockStartMs, t) : geo.step >= 60 ? `${Math.round(t / 3600)}h` : `${Math.round(t / 60)}m`}
             </text>
           ))}
           {hoverT != null && <line x1={hx} x2={hx} y1={top0 + 16} y2={axisY} stroke="var(--text-muted)" strokeWidth={1} pointerEvents="none" />}
@@ -161,9 +170,9 @@ export default function MultiTimeline({ panels, band, durationS }: {
           <div style={{
             position: 'absolute', top: 8, left: `calc(${(hx / W) * 100}% + ${hx / W > 0.65 ? '-230px' : '12px'})`,
             pointerEvents: 'none', background: 'var(--bg-surface)', border: '1px solid var(--border-strong)', borderRadius: '10px',
-            padding: '8px 12px', fontSize: '12px', lineHeight: 1.6, boxShadow: '0 8px 24px rgba(0,0,0,0.45)', whiteSpace: 'nowrap',
+            padding: '8px 12px', fontSize: '12px', lineHeight: 1.6, boxShadow: '0 8px 24px rgba(var(--shadow-rgb),0.45)', whiteSpace: 'nowrap',
           }}>
-            <div style={{ color: 'var(--text-muted)' }}>{fmtOffset(hoverT)}</div>
+            <div style={{ color: 'var(--text-muted)' }}>{clockStartMs != null ? `${clockAt(clockStartMs, hoverT)} · ${fmtOffset(hoverT)}` : fmtOffset(hoverT)}</div>
             {panels.map(panel => (
               <div key={panel.title}>
                 <span style={{ color: 'var(--text-secondary)' }}>{panel.title}{panel.subtitle ? ` · ${panel.subtitle}` : ''}: </span>
@@ -184,7 +193,7 @@ export default function MultiTimeline({ panels, band, durationS }: {
         )}
       </div>
       {band && <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '6px' }}>
-        <span style={{ display: 'inline-block', width: 12, height: 9, borderRadius: 2, background: 'rgba(255,255,255,0.12)', marginRight: 6 }} />{band.label}
+        <span style={{ display: 'inline-block', width: 12, height: 9, borderRadius: 2, background: 'rgba(var(--fg-rgb),0.12)', marginRight: 6 }} />{band.label}
       </div>}
     </div>
   )

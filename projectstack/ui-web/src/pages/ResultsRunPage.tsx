@@ -3,16 +3,18 @@
  * evidence, statistics per transaction and request, the comparison with its
  * baseline, reports, and questions answered by the AI over the run's data.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { ArrowLeft, ChevronDown, ChevronRight, Download, ExternalLink, FileText, GitCompare, ListTree, MessageSquare, Search, Send, Trash2 } from 'lucide-react'
+import { ArrowLeft, ChevronDown, ChevronRight, Download, ExternalLink, FileCode, FileText, FileType, GitCompare, ListTree, MessageSquare, Search, Send, Trash2 } from 'lucide-react'
 import {
-  askRun, deleteResultRun, downloadLabelsReport, downloadResultReport, getResultRun, labelsReportUrl, listRunLabels,
-  resultReportUrl, type AnalysisFinding, type AskAnswer, type LabelStats, type RunAnalysis,
+  askRun, deleteResultRun, downloadLabelsReport, downloadResultReport, getJmeterStatistics, getReportTemplate, getResultRun, labelsReportUrl,
+  listRunLabels, resultReportUrl, type AnalysisFinding, type AskAnswer, type JmeterStatistics, type JmeterStatRow, type LabelStats,
+  type RunAnalysis,
 } from '../api/client'
 import ObservationsPanel from '../components/results/ObservationsPanel'
 import ServerMetricsCard from '../components/results/ServerMetrics'
+import ServerScreenshotsCard from '../components/results/ServerScreenshots'
 import Timeline from '../components/results/Timeline'
 import {
   Btn, Card, CardTitle, Notice, RichText, SeverityBadge, Spinner, Stat, VerdictBadge, fieldStyle, fmtDate,
@@ -65,7 +67,7 @@ export default function ResultsRunPage() {
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
             <Btn small onClick={() => window.open(resultReportUrl(a.run.run_id, 'tech', useAi), '_blank')}><FileText size={13} /> Technical report <ExternalLink size={12} /></Btn>
             <Btn small variant="ghost" onClick={() => window.open(resultReportUrl(a.run.run_id, 'exec', useAi), '_blank')}>Executive summary <ExternalLink size={12} /></Btn>
-            <Btn small variant="ghost" onClick={() => downloadResultReport(a.run.run_id, 'tech', 'md', useAi).catch(e => setError(String(e)))}><Download size={13} /> Markdown</Btn>
+            <DownloadMenu runId={a.run.run_id} useAi={useAi} onError={setError} />
             <Btn small variant="ghost" onClick={() => window.open(labelsReportUrl(a.run.run_id), '_blank')} title="A section per transaction and main request, with a plain-language summary of each">
               <ListTree size={13} /> Requests & transactions <ExternalLink size={12} />
             </Btn>
@@ -105,6 +107,8 @@ export default function ResultsRunPage() {
         </Card>
 
         <ServerMetricsCard analysis={a} onAttached={() => getResultRun(runId).then(setA).catch(() => {})} />
+
+        <ServerScreenshotsCard analysis={a} />
 
         <Card style={{ marginBottom: '20px' }}>
           <CardTitle>Findings <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>({a.findings.length})</span></CardTitle>
@@ -146,15 +150,7 @@ export default function ResultsRunPage() {
 
         {a.baseline && <BaselineCard a={a} />}
 
-        {(['transaction', 'request'] as const).map(k => a.labels[k]?.length ? (
-          <Card key={k} style={{ marginBottom: '20px' }}>
-            <CardTitle right={k === 'request' ? (
-              <Btn small variant="ghost" onClick={() => downloadLabelsReport(a.run.run_id, 'md').catch(e => setError(String(e)))}><Download size={13} /> Per-label report (Markdown)</Btn>
-            ) : undefined}>{k === 'transaction' ? 'Transactions' : 'Requests'}</CardTitle>
-            <LabelTable rows={a.labels[k]!} runId={a.run.run_id} />
-            <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '8px' }}>Times in ms over the steady state; percentiles are exact (JMeter Aggregate Report definition).</div>
-          </Card>
-        ) : null)}
+        <StatisticsCard a={a} onError={setError} />
 
         <LabelSearch runId={a.run.run_id} total={a.run.labels.request + a.run.labels.transaction} />
 
@@ -204,9 +200,119 @@ export default function ResultsRunPage() {
   )
 }
 
+type DownloadKind = { key: string; label: string; detail: string; md?: boolean; word?: boolean; ext?: 'doc' | 'docx'; run: (runId: string, ai: boolean) => Promise<void> }
+
+const DOWNLOADS: DownloadKind[] = [
+  { key: 'doc', label: 'Performance report', word: true, ext: 'doc', detail: 'The full report as a Word 97–2003 document in numbered sections (4. Performance Highlights & Observations …), with the charts and screenshots as pictures',
+    run: (id, ai) => downloadResultReport(id, 'tech', 'doc', ai) },
+  { key: 'docx', label: 'Performance report', word: true, ext: 'docx', detail: 'The same report as a current Word document, for Google Docs and newer Word',
+    run: (id, ai) => downloadResultReport(id, 'tech', 'docx', ai) },
+  { key: 'tech-html', label: 'Technical report', detail: 'The whole analysis in one HTML file: highlights, timeline, findings, tables, server metrics, screenshots and their comparison with the load test',
+    run: (id, ai) => downloadResultReport(id, 'tech', 'html', ai) },
+  { key: 'exec-html', label: 'Executive summary', detail: 'One page: verdict, headline figures, highlights, business impact and the recommended action',
+    run: (id, ai) => downloadResultReport(id, 'exec', 'html', ai) },
+  { key: 'labels-html', label: 'Requests & transactions', detail: 'A section per transaction and main request, with a plain-language summary of each',
+    run: id => downloadLabelsReport(id, 'html') },
+  { key: 'tech-md', label: 'Technical report', detail: 'The same content as Markdown, for a wiki or a pull request', md: true,
+    run: (id, ai) => downloadResultReport(id, 'tech', 'md', ai) },
+]
+
+/** Reports to save: single HTML files with everything embedded (pictures included), or Markdown. */
+function DownloadMenu({ runId, useAi, onError }: { runId: string; useAi: boolean; onError: (e: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [template, setTemplate] = useState<string | null | undefined>(undefined)   // undefined: not asked yet
+  const [docInfo, setDocInfo] = useState<{ available: boolean; install: string } | null>(null)
+  const box = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (open && template === undefined) {
+      getReportTemplate().then(t => { setTemplate(t.template?.name ?? null); setDocInfo(t.doc) }).catch(() => setTemplate(null))
+    }
+  }, [open, template])
+
+  useEffect(() => {
+    if (!open) return
+    const outside = (e: MouseEvent) => { if (box.current && !box.current.contains(e.target as Node)) setOpen(false) }
+    const escape = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', outside)
+    document.addEventListener('keydown', escape)
+    return () => { document.removeEventListener('mousedown', outside); document.removeEventListener('keydown', escape) }
+  }, [open])
+
+  const get = async (d: DownloadKind) => {
+    setBusy(d.key); setOpen(false)
+    try {
+      await d.run(runId, useAi)
+    } catch (e) {
+      onError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <div ref={box} style={{ position: 'relative' }}>
+      <Btn small variant="ghost" onClick={() => setOpen(o => !o)} disabled={busy !== null}
+        title="Save a report as a file (HTML opens in any browser and can be shared or printed)">
+        {busy ? <><Spinner size={13} /> Preparing…</> : <><Download size={13} /> Download <ChevronDown size={12} /></>}
+      </Btn>
+      {open && (
+        <div role="menu" aria-label="Download a report"
+          style={{
+            position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 50, width: 'min(360px, calc(100vw - 32px))',
+            background: 'var(--bg-elevated)', border: '1px solid var(--border-strong)', borderRadius: '14px', padding: '6px',
+            boxShadow: '0 16px 40px -12px rgba(var(--shadow-rgb),0.45)',
+          }}>
+          {DOWNLOADS.map((d, i) => (
+            <div key={d.key}>
+              {i > 0 && ((d.md && !DOWNLOADS[i - 1].md) || (DOWNLOADS[i - 1].word && !d.word)) && <div style={{ height: 1, background: 'var(--border)', margin: '6px 8px' }} />}
+              <button role="menuitem" onClick={() => get(d)} autoFocus={i === 0}
+                disabled={d.ext === 'doc' && docInfo !== null && !docInfo.available}
+                aria-disabled={d.ext === 'doc' && docInfo !== null && !docInfo.available}
+                style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', width: '100%', textAlign: 'left', padding: '9px 10px',
+                  borderRadius: '10px', border: 'none', background: 'transparent', color: 'var(--text-primary)',
+                  cursor: d.ext === 'doc' && docInfo && !docInfo.available ? 'not-allowed' : 'pointer',
+                  opacity: d.ext === 'doc' && docInfo && !docInfo.available ? 0.6 : 1 }}
+                onMouseEnter={e => (e.currentTarget.style.background = 'rgba(var(--fg-rgb),0.06)')}
+                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                onFocus={e => (e.currentTarget.style.background = 'rgba(var(--fg-rgb),0.06)')}
+                onBlur={e => (e.currentTarget.style.background = 'transparent')}>
+                {d.word ? <FileType size={15} style={{ flexShrink: 0, marginTop: 2, color: 'var(--c-blue)' }} />
+                  : d.md ? <FileText size={15} style={{ flexShrink: 0, marginTop: 2, color: 'var(--text-muted)' }} />
+                  : <FileCode size={15} style={{ flexShrink: 0, marginTop: 2, color: 'var(--accent)' }} />}
+                <span style={{ minWidth: 0 }}>
+                  <span style={{ display: 'block', fontSize: '13.5px', fontWeight: 600 }}>
+                    {d.label} <span style={{ fontWeight: 500, color: 'var(--text-muted)' }}>· {d.word ? `Word (.${d.ext})` : d.md ? 'Markdown' : 'HTML'}</span>
+                  </span>
+                  <span style={{ display: 'block', fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.45, marginTop: 2 }}>{d.detail}</span>
+                  {d.ext === 'doc' && docInfo && !docInfo.available && (
+                    <span style={{ display: 'block', fontSize: '12px', color: 'var(--warning)', marginTop: 3 }}>
+                      Needs LibreOffice on this machine: <code style={{ fontSize: '11px' }}>{docInfo.install}</code>
+                    </span>
+                  )}
+                  {d.ext === 'doc' && (
+                    <span style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginTop: 3 }}>
+                      {template === undefined ? 'Checking the template…' : template ? <>In your company template: {template}</> : <>Built-in layout · <Link to="/settings#report-template" onClick={e => e.stopPropagation()} style={{ color: 'var(--accent)' }}>add your company template</Link></>}
+                    </span>
+                  )}
+                </span>
+              </button>
+            </div>
+          ))}
+          <div style={{ fontSize: '11.5px', color: 'var(--text-muted)', padding: '6px 10px 4px', lineHeight: 1.45 }}>
+            {useAi ? 'With the AI narrative (it is written first if it is not saved yet). ' : 'Rule-based text: nothing is sent to an AI provider. Tick AI narrative for the AI-written version. '}
+            HTML files follow the reader's light or dark mode and print cleanly.
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function Page({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ maxWidth: '1100px', margin: '0 auto', padding: '32px 24px 64px' }}>
+    <div style={{ maxWidth: '1440px', margin: '0 auto', padding: '32px 24px 64px' }}>
       {children}
       <style>{'@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }'}</style>
     </div>
@@ -275,6 +381,160 @@ function FindingRow({ f }: { f: AnalysisFinding }) {
         </div>
       )}
     </div>
+  )
+}
+
+// -- Statistics: JMeter's HTML report table (default) or the steady-state analysis ---------
+
+type StatsView = 'jmeter' | 'steady'
+const STATS_VIEW_KEY = 'pstack.results.statsView'
+const STATS_VIEWS: { key: StatsView; label: string; title: string }[] = [
+  { key: 'jmeter', label: 'As in JMeter HTML report', title: 'Whole run, computed the way JMeter’s HTML report computes its Statistics table: the same numbers' },
+  { key: 'steady', label: 'Steady state', title: 'The analysis’s own figures: steady state only, exact percentiles' },
+]
+
+function readStatsView(): StatsView {
+  try { return localStorage.getItem(STATS_VIEW_KEY) === 'steady' ? 'steady' : 'jmeter' } catch { return 'jmeter' }
+}
+
+function StatisticsCard({ a, onError }: { a: RunAnalysis; onError: (e: string) => void }) {
+  const [view, setViewState] = useState<StatsView>(readStatsView)
+  const setView = (v: StatsView) => {
+    setViewState(v)
+    try { localStorage.setItem(STATS_VIEW_KEY, v) } catch { /* storage unavailable: the choice lasts this visit */ }
+  }
+  const kinds = (['transaction', 'request'] as const).filter(k => a.labels[k]?.length)
+  const note: React.CSSProperties = { fontSize: '12px', color: 'var(--text-muted)', marginTop: '8px', lineHeight: 1.6 }
+  return (
+    <Card style={{ marginBottom: '20px' }}>
+      <CardTitle right={
+        <div role="tablist" aria-label="Which statistics to show"
+          style={{ display: 'inline-flex', gap: '3px', padding: '3px', borderRadius: '999px', border: '1px solid var(--border)', background: 'var(--bg-elevated)' }}>
+          {STATS_VIEWS.map(v => (
+            <button key={v.key} role="tab" aria-selected={view === v.key} title={v.title} onClick={() => setView(v.key)}
+              style={{
+                padding: '6px 14px', borderRadius: '999px', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: 600, whiteSpace: 'nowrap',
+                background: view === v.key ? 'var(--accent-gradient)' : 'transparent', color: view === v.key ? '#fff' : 'var(--text-secondary)',
+              }}>{v.label}</button>
+          ))}
+        </div>
+      }>Statistics</CardTitle>
+
+      {view === 'jmeter' ? <JmeterStatsTable runId={a.run.run_id} /> : (
+        <>
+          {kinds.map(k => (
+            <div key={k} style={{ marginBottom: '18px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', marginBottom: '6px' }}>
+                <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{k === 'transaction' ? 'Transactions' : 'Requests'}</div>
+                {k === 'request' && (
+                  <Btn small variant="ghost" onClick={() => downloadLabelsReport(a.run.run_id, 'md').catch(e => onError(String(e)))}>
+                    <Download size={13} /> Per-label report (Markdown)
+                  </Btn>
+                )}
+              </div>
+              <LabelTable rows={a.labels[k]!} runId={a.run.run_id} />
+            </div>
+          ))}
+          <div style={note}>
+            Times in ms over the steady state, {fmtOffset(a.steady.start_offset_s)} to {fmtOffset(a.steady.end_offset_s)}; percentiles
+            are exact (JMeter Aggregate Report definition). These are the figures the findings, SLA checks and comparisons use.
+          </div>
+        </>
+      )}
+    </Card>
+  )
+}
+
+type JCol = { key: keyof JmeterStatRow; head: string; decimals: number; pct?: boolean }
+const JMETER_ROWS_SHOWN = 100
+
+function JmeterStatsTable({ runId }: { runId: string }) {
+  const [data, setData] = useState<JmeterStatistics | null>(null)
+  const [error, setError] = useState('')
+  const [sort, setSort] = useState<{ key: keyof JmeterStatRow; desc: boolean }>({ key: 'label', desc: false })
+  const [showAll, setShowAll] = useState(false)
+
+  useEffect(() => {
+    setData(null); setError('')
+    getJmeterStatistics(runId).then(setData).catch(e => setError(e instanceof Error ? e.message : String(e)))
+  }, [runId])
+
+  if (error) return <Notice tone="warning">{error}</Notice>
+  if (!data) return <div style={{ color: 'var(--text-muted)', display: 'flex', gap: 8, alignItems: 'center', fontSize: '13px' }}><Spinner /> Computing the statistics…</div>
+
+  const pct = data.percentiles.map(p => `${Math.round(p * 100)}th pct`)
+  const groups: { head: string; cols: JCol[] }[] = [
+    { head: 'Executions', cols: [
+      { key: 'samples', head: '#Samples', decimals: 0 }, { key: 'errors', head: 'FAIL', decimals: 0 },
+      { key: 'error_pct', head: 'Error %', decimals: 2, pct: true }] },
+    { head: 'Response Times (ms)', cols: [
+      { key: 'avg_ms', head: 'Average', decimals: 2 }, { key: 'min_ms', head: 'Min', decimals: 0 }, { key: 'max_ms', head: 'Max', decimals: 0 },
+      { key: 'median_ms', head: 'Median', decimals: 2 }, { key: 'p90_ms', head: pct[0], decimals: 2 },
+      { key: 'p95_ms', head: pct[1], decimals: 2 }, { key: 'p99_ms', head: pct[2], decimals: 2 }] },
+    { head: 'Throughput', cols: [{ key: 'tps', head: 'Transactions/s', decimals: 2 }] },
+    { head: 'Network (KB/sec)', cols: [{ key: 'received_kbps', head: 'Received', decimals: 2 }, { key: 'sent_kbps', head: 'Sent', decimals: 2 }] },
+  ]
+  const cols = groups.flatMap(g => g.cols)
+  const sorted = [...data.labels].sort((x, y) => {
+    const d = sort.key === 'label' ? x.label.localeCompare(y.label) : Number(x[sort.key]) - Number(y[sort.key])
+    return sort.desc ? -d : d
+  })
+  const rows = showAll ? sorted : sorted.slice(0, JMETER_ROWS_SHOWN)
+  const onSort = (key: keyof JmeterStatRow) =>
+    setSort(s => s.key === key ? { key, desc: !s.desc } : { key, desc: key !== 'label' })
+  const arrow = (key: keyof JmeterStatRow) => sort.key === key ? (sort.desc ? ' ↓' : ' ↑') : ''
+  const cell = (r: JmeterStatRow, c: JCol) => {
+    const v = Number(r[c.key])
+    return c.pct ? `${fmtNum(v, c.decimals)}%` : fmtNum(v, c.decimals)
+  }
+  const groupTh: React.CSSProperties = { ...th, textAlign: 'center', color: 'var(--text-secondary)', borderLeft: '1px solid var(--border)' }
+  const total = data.total
+
+  return (
+    <>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              <th style={{ ...th, textAlign: 'left', color: 'var(--text-secondary)' }}>Requests</th>
+              {groups.map(g => <th key={g.head} colSpan={g.cols.length} style={groupTh}>{g.head}</th>)}
+            </tr>
+            <tr>
+              <th style={{ ...th, textAlign: 'left', cursor: 'pointer' }} onClick={() => onSort('label')}>Label{arrow('label')}</th>
+              {cols.map(c => <th key={c.key} style={{ ...th, ...num, cursor: 'pointer' }} onClick={() => onSort(c.key)}>{c.head}{arrow(c.key)}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style={{ ...td, color: 'var(--text-primary)', fontWeight: 600 }}>Total</td>
+              {cols.map(c => <td key={c.key} style={{ ...td, ...num, color: 'var(--text-primary)', fontWeight: 600 }}>{cell(total, c)}</td>)}
+            </tr>
+            {rows.map(r => (
+              <tr key={r.label}>
+                <td style={{ ...td, maxWidth: '360px', wordBreak: 'break-word' }}>
+                  <Link to={`/analyze/${runId}/label?name=${encodeURIComponent(r.label)}`} style={{ color: 'var(--text-primary)', textDecoration: 'none' }}
+                    onMouseEnter={e => (e.currentTarget.style.textDecoration = 'underline')} onMouseLeave={e => (e.currentTarget.style.textDecoration = 'none')}>{r.label}</Link>
+                </td>
+                {cols.map(c => (
+                  <td key={c.key} style={{ ...td, ...num, color: c.key === 'error_pct' && r.error_pct > 0 ? 'var(--text-primary)' : undefined }}>{cell(r, c)}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {sorted.length > rows.length && (
+        <div style={{ marginTop: '10px' }}>
+          <Btn small variant="ghost" onClick={() => setShowAll(true)}>Show all {fmtNum(sorted.length)} labels</Btn>
+        </div>
+      )}
+      <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '8px', lineHeight: 1.6 }}>
+        Whole run, including ramp-up and ramp-down, computed the way JMeter’s HTML report computes its Statistics table, so the
+        numbers are the same: transactions where nothing ran are left out, the Total row counts requests (not transactions),
+        the median and percentiles cover each row’s last {fmtNum(data.window)} samples, and throughput is per each row’s own
+        first-to-last time.
+      </div>
+    </>
   )
 }
 
@@ -435,7 +695,7 @@ function AskCard({ runId }: { runId: string }) {
       {!answers.length && !busy && (
         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
           {SUGGESTIONS.map(s => (
-            <button key={s} onClick={() => ask(s)} style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', borderRadius: '999px', padding: '5px 12px', color: 'var(--text-secondary)', fontSize: '12px', cursor: 'pointer' }}>{s}</button>
+            <button key={s} onClick={() => ask(s)} style={{ background: 'rgba(var(--fg-rgb),0.04)', border: '1px solid var(--border)', borderRadius: '999px', padding: '5px 12px', color: 'var(--text-secondary)', fontSize: '12px', cursor: 'pointer' }}>{s}</button>
           ))}
         </div>
       )}

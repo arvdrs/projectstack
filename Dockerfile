@@ -59,8 +59,9 @@ ENV LANG=C.UTF-8 \
     PSTACK_IN_DOCKER=1
 ENV PATH="/opt/jmeter/bin:${JAVA_HOME}/bin:${PATH}"
 
+# LibreOffice Writer (no GUI) converts Word reports to Word 97–2003 (.doc); DejaVu draws their charts
 RUN apt-get update \
- && apt-get install -y --no-install-recommends tzdata \
+ && apt-get install -y --no-install-recommends tzdata libreoffice-writer-nogui fonts-dejavu-core \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

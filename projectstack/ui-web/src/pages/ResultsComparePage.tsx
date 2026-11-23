@@ -52,7 +52,7 @@ export default function ResultsComparePage() {
   )
 
   return (
-    <div style={{ maxWidth: '1100px', margin: '0 auto', padding: '32px 24px 64px' }}>
+    <div style={{ maxWidth: '1440px', margin: '0 auto', padding: '32px 24px 64px' }}>
       <Link to={current ? `/analyze/${current}` : '/analyze'} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: 'var(--text-secondary)', textDecoration: 'none', fontSize: '14px', marginBottom: '18px' }}>
         <ArrowLeft size={15} /> {current ? 'Back to the run' : 'All analyses'}
       </Link>
@@ -194,7 +194,7 @@ function Comparison({ c, filter, setFilter, openRun }: {
               <button key={f} onClick={() => setFilter(f)} style={{
                 padding: '5px 12px', borderRadius: '999px', fontSize: '12px', cursor: 'pointer', textTransform: 'capitalize',
                 border: '1px solid var(--border)', color: filter === f ? 'var(--text-primary)' : 'var(--text-secondary)',
-                background: filter === f ? 'rgba(255,255,255,0.1)' : 'transparent',
+                background: filter === f ? 'rgba(var(--fg-rgb),0.1)' : 'transparent',
               }}>{f}</button>
             ))}
           </div>

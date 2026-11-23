@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom'
 import { ArrowUpRight } from 'lucide-react'
+import ThemeToggle from './ThemeToggle'
 
 const linkStyle = (isActive: boolean): React.CSSProperties => ({
   padding: '8px 18px',
@@ -8,7 +9,7 @@ const linkStyle = (isActive: boolean): React.CSSProperties => ({
   fontSize: '14px',
   fontWeight: 500,
   color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
-  background: isActive ? 'rgba(255,255,255,0.1)' : 'transparent',
+  background: isActive ? 'rgba(var(--fg-rgb),0.1)' : 'transparent',
   transition: 'all 0.2s ease',
 })
 
@@ -16,7 +17,7 @@ export default function Navigation() {
   return (
     <nav
       style={{
-        background: 'rgba(16,15,15,0.72)',
+        background: 'var(--nav-bg)',
         backdropFilter: 'blur(18px)',
         WebkitBackdropFilter: 'blur(18px)',
         borderBottom: '1px solid var(--border)',
@@ -75,7 +76,7 @@ export default function Navigation() {
           padding: '4px',
           borderRadius: '999px',
           border: '1px solid var(--border)',
-          background: 'rgba(255,255,255,0.03)',
+          background: 'rgba(var(--fg-rgb),0.03)',
         }}
       >
         <NavLink to="/app" style={({ isActive }) => linkStyle(isActive)}>
@@ -88,6 +89,8 @@ export default function Navigation() {
           Settings
         </NavLink>
       </div>
+
+      <ThemeToggle />
 
       <a
         href="https://github.com"

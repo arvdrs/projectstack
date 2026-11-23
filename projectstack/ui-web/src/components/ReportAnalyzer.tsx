@@ -25,7 +25,7 @@ function Button({ children, onClick, disabled, variant = 'primary', type = 'butt
         display: 'inline-flex', alignItems: 'center', gap: '6px', borderRadius: '999px', fontWeight: 500, fontSize: '13px',
         padding: '8px 16px', cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1, whiteSpace: 'nowrap',
         border: primary ? 'none' : '1px solid var(--border-strong)',
-        background: primary ? 'var(--accent-gradient)' : 'rgba(255,255,255,0.05)',
+        background: primary ? 'var(--accent-gradient)' : 'rgba(var(--fg-rgb),0.05)',
         color: primary ? '#fff' : 'var(--text-primary)',
         boxShadow: primary ? '0 6px 20px -8px rgba(var(--accent-rgb),0.7)' : 'none',
       }}>
@@ -87,7 +87,7 @@ export default function ReportAnalyzer({ sessionId }: { sessionId: string }) {
   const k = data?.kpis
 
   return (
-    <div style={{ marginTop: '20px', background: 'var(--glass), var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: '20px', padding: '28px', boxShadow: '0 20px 40px -24px rgba(0,0,0,0.6)' }}>
+    <div style={{ marginTop: '20px', background: 'var(--glass), var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: '20px', padding: '28px', boxShadow: '0 20px 40px -24px rgba(var(--shadow-rgb),0.6)' }}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
         <div style={{ width: '40px', height: '40px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(var(--accent-rgb),0.12)', border: '1px solid rgba(var(--accent-rgb),0.3)', flexShrink: 0 }}>
@@ -126,7 +126,7 @@ export default function ReportAnalyzer({ sessionId }: { sessionId: string }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: '20px', marginTop: '24px', padding: '18px 22px', borderRadius: '16px', background: `rgba(${v.rgb},0.08)`, border: `1px solid rgba(${v.rgb},0.3)`, flexWrap: 'wrap' }}>
             {data.score != null
               ? <ScoreRing score={data.score} color={v.color} />
-              : <div style={{ width: '64px', height: '64px', borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '6px solid rgba(255,255,255,0.08)' }}><Activity size={20} style={{ color: 'var(--text-muted)' }} /></div>}
+              : <div style={{ width: '64px', height: '64px', borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '6px solid rgba(var(--fg-rgb),0.08)' }}><Activity size={20} style={{ color: 'var(--text-muted)' }} /></div>}
             <div style={{ flex: 1, minWidth: '220px' }}>
               <div style={{ fontSize: '12px', letterSpacing: '0.1em', fontWeight: 600, color: v.color }}>{v.label}</div>
               <div style={{ fontSize: '17px', fontWeight: 500, marginTop: '4px' }}>{data.headline}</div>
@@ -146,7 +146,7 @@ export default function ReportAnalyzer({ sessionId }: { sessionId: string }) {
               // Apdex needs a response-time target, so it is shown only with an SLA
               ...(k.apdex != null ? [['Apdex', k.apdex.toFixed(2), k.apdex_rating ?? undefined]] : []),
             ].map(([label, value, sub]) => (
-              <div key={label} style={{ padding: '14px 16px', borderRadius: '14px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)' }}>
+              <div key={label} style={{ padding: '14px 16px', borderRadius: '14px', background: 'rgba(var(--fg-rgb),0.03)', border: '1px solid var(--border)' }}>
                 <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)' }}>{label}</div>
                 <div style={{ fontSize: '22px', fontWeight: 600, marginTop: '6px', letterSpacing: '-0.01em' }}>{value}</div>
                 {sub && <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{sub}</div>}
@@ -161,7 +161,7 @@ export default function ReportAnalyzer({ sessionId }: { sessionId: string }) {
               const s = SEVERITY[f.severity]
               return (
                 <motion.div key={f.title + i} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.04 }}
-                  style={{ display: 'flex', gap: '14px', padding: '14px 16px', borderRadius: '14px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)', borderLeft: `3px solid ${s.color}` }}>
+                  style={{ display: 'flex', gap: '14px', padding: '14px 16px', borderRadius: '14px', background: 'rgba(var(--fg-rgb),0.02)', border: '1px solid var(--border)', borderLeft: `3px solid ${s.color}` }}>
                   <s.Icon size={17} style={{ color: s.color, flexShrink: 0, marginTop: '1px' }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
@@ -203,7 +203,7 @@ function ScoreRing({ score, color }: { score: number; color: string }) {
   return (
     <div style={{ position: 'relative', width: '64px', height: '64px', flexShrink: 0 }}>
       <svg width="64" height="64" viewBox="0 0 64 64" style={{ transform: 'rotate(-90deg)' }}>
-        <circle cx="32" cy="32" r={r} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="6" />
+        <circle cx="32" cy="32" r={r} fill="none" stroke="rgba(var(--fg-rgb),0.08)" strokeWidth="6" />
         <motion.circle cx="32" cy="32" r={r} fill="none" stroke={color} strokeWidth="6" strokeLinecap="round"
           strokeDasharray={c} initial={{ strokeDashoffset: c }} animate={{ strokeDashoffset: c * (1 - score / 100) }}
           transition={{ duration: 1, ease: 'easeOut' }} />
@@ -269,7 +269,7 @@ function ShareModal({ sessionId, insights, onClose }: { sessionId: string; insig
       <motion.div role="dialog" aria-modal="true" aria-label="Share report via Gmail"
         initial={{ opacity: 0, y: 20, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 10 }}
         onClick={e => e.stopPropagation()}
-        style={{ width: '100%', maxWidth: '560px', maxHeight: 'calc(100vh - 32px)', overflowY: 'auto', background: '#1a1919', border: '1px solid var(--border-strong)', borderRadius: '24px', padding: '28px', boxShadow: '0 40px 80px -20px rgba(0,0,0,0.8)' }}>
+        style={{ width: '100%', maxWidth: '560px', maxHeight: 'calc(100vh - 32px)', overflowY: 'auto', background: 'var(--bg-elevated)', border: '1px solid var(--border-strong)', borderRadius: '24px', padding: '28px', boxShadow: '0 40px 80px -20px rgba(var(--shadow-rgb),0.8)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
           <div style={{ width: '40px', height: '40px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--accent-gradient)' }}>
             <Mail size={17} color="#fff" />
@@ -280,7 +280,7 @@ function ShareModal({ sessionId, insights, onClose }: { sessionId: string; insig
               {gmail?.configured ? <>Sending from <span style={{ color: 'var(--text-secondary)' }}>{gmail.address}</span></> : 'Email the insights, metrics and observations'}
             </div>
           </div>
-          <button onClick={onClose} disabled={sending} aria-label="Close" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', borderRadius: '50%', width: '34px', height: '34px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', cursor: 'pointer' }}>
+          <button onClick={onClose} disabled={sending} aria-label="Close" style={{ background: 'rgba(var(--fg-rgb),0.05)', border: '1px solid var(--border)', borderRadius: '50%', width: '34px', height: '34px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', cursor: 'pointer' }}>
             <X size={15} />
           </button>
         </div>
@@ -320,7 +320,7 @@ function ShareModal({ sessionId, insights, onClose }: { sessionId: string; insig
             </Field>
 
             <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-secondary)', margin: '4px 0 8px' }}>Include</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px 14px', borderRadius: '14px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px 14px', borderRadius: '14px', background: 'rgba(var(--fg-rgb),0.03)', border: '1px solid var(--border)' }}>
               <Check checked disabled label={`${insights.sla?.defined ? 'SLA result, k' : 'K'}ey metrics, insights, transactions and errors`} />
               <Check checked={includeAi} onChange={setIncludeAi} disabled={!insights.ai_summary}
                 label={insights.ai_summary ? 'AI narrative and recommendations' : 'AI narrative — generate it first with "Add AI narrative"'} />

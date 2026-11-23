@@ -668,10 +668,12 @@ def runs_delete(run_ref, yes, clickhouse_url):
 @click.argument("run_ref")
 @click.option("--audience", type=click.Choice(["tech", "exec"]), default="tech", show_default=True,
               help="tech: full engineering report · exec: one-page summary for decision makers.")
-@click.option("--format", "formats", type=click.Choice(["html", "md", "both"]), default="html", show_default=True)
+@click.option("--format", "formats", type=click.Choice(["html", "md", "both", "doc", "docx"]), default="html",
+              show_default=True, help="doc / docx: the full performance report in Word (97–2003 or current), in the "
+                                       "company template set in the web app's Settings; .doc needs LibreOffice.")
 @click.option("--no-llm", is_flag=True, help="Write the narrative with rules; nothing is sent to an AI service.")
 @click.option("--provider", "provider_spec", default=None, metavar="NAME[/MODEL]",
-              help="AI provider for this report, e.g. claude, gemini, groq/llama-3.3-70b-versatile "
+              help="AI provider for this report, e.g. claude, gemini, groq/openai/gpt-oss-120b "
                    "(default: the 'report' task setting).")
 @click.option("--strict-numbers", is_flag=True,
               help="Fail (exit 3) if the AI narrative cites numbers that are not in findings.json, after one retry.")
@@ -692,6 +694,9 @@ def report(run_ref, audience, formats, no_llm, provider_spec, strict_numbers, fr
         from projectstack.results import store
         return store.resolve_run(_results_db(clickhouse_url), ref)
 
+    if formats in ("doc", "docx"):
+        _word_report(run_ref, no_llm, provider_spec, out, resolve_in_db, formats)
+        return
     if out == "-" and formats != "md":
         formats = "md"
     chosen = ("html", "md") if formats == "both" else (formats,)
@@ -722,11 +727,83 @@ def report(run_ref, audience, formats, no_llm, provider_spec, strict_numbers, fr
         click.echo(str(path))
 
 
+@cli.command("create-report")
+@click.argument("blueprint", type=click.Path(exists=True, dir_okay=False))
+@click.argument("runs", nargs=-1, required=True, metavar="RUN[=TITLE]...")
+@click.option("--out", required=True, metavar="FILE", help="The new report: .docx, .doc or .pdf (LibreOffice for the last two).")
+@click.option("--ai", is_flag=True, help="AI-written highlights (your AI provider gets each run's findings and notes).")
+@click.option("--clickhouse-url", default=None, help="Results database (default: from settings).")
+def create_report(blueprint, runs, out, ai, clickhouse_url):
+    """A new report in the exact format of a past one (BLUEPRINT, a .docx), from analysed runs.
+
+    One subsection of "Performance Highlights & Observations" per RUN, in order; TITLE names it
+    (default: "<test type> - <region> region"), e.g. 20261105-0530="Incremental Load Test - US region".
+    The cover, styles, header, footer and the sections before the highlights are the blueprint's.
+    """
+    from pathlib import Path
+    from projectstack.config import load_settings
+    from projectstack.results import blueprint as bp, office, store
+    from projectstack.results.report import ReportError, locate
+    settings = load_settings()
+    db = _results_db(clickhouse_url)
+    inputs = []
+    try:
+        for spec in runs:
+            ref, _, title = spec.partition("=")
+            folder, doc = locate(ref, Path(settings["runs_dir"]), lambda r: store.resolve_run(db, r))
+            inputs.append(bp.RunInput(folder, doc, title.strip()))
+        data, notes = bp.build(Path(blueprint).read_bytes(), inputs, settings=settings, db=db, use_llm=ai,
+                               progress=lambda msg: click.echo(msg, err=True))
+        target = Path(out).expanduser()
+        ext = target.suffix.lower().lstrip(".")
+        if ext in ("doc", "pdf"):
+            data = office.convert(data, "docx", ext, settings)
+        elif ext != "docx":
+            raise click.BadParameter("use .docx, .doc or .pdf", param_hint="--out")
+    except (bp.BlueprintError, ReportError, LookupError, office.OfficeError) as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(2)
+    for n in notes:
+        click.echo(f"Note: {n}", err=True)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(data)
+    click.echo(str(target))
+
+
+def _word_report(run_ref, no_llm, provider_spec, out, resolve_in_db, ext="docx") -> None:
+    """The performance report in Word (always the full report, in the company template when one is set)."""
+    from pathlib import Path
+    from projectstack.config import load_settings
+    from projectstack.results import word
+    from projectstack.results.report import ReportError, locate
+    settings = load_settings()
+    try:
+        folder, doc = locate(run_ref, Path(settings["runs_dir"]), resolve_in_db)
+        build = word.build_doc if ext == "doc" else word.build
+        data, warnings = build(folder, doc, settings=settings, use_llm=not no_llm, provider_spec=provider_spec,
+                               progress=lambda msg: click.echo(msg, err=True))
+    except (ReportError, LookupError, word.WordError) as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(2)
+    for w in warnings:
+        click.echo(f"Warning: {w}", err=True)
+    target = Path(out).expanduser() if out and out != "-" else folder / f"report_performance.{ext}"
+    if target.is_dir():
+        target = target / f"report_performance.{ext}"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(data)
+    tpl = word.template_info(settings)
+    click.echo(f"Template: {tpl['name'] if tpl else 'built-in layout'}", err=True)
+    click.echo(str(target))
+
+
 @cli.command()
 @click.argument("run_ref")
 @click.argument("label", required=False)
 @click.option("--limit", default=40, show_default=True, help="Most labels in the report (all transactions are always in).")
-@click.option("--format", "formats", type=click.Choice(["html", "md", "both"]), default="html", show_default=True)
+@click.option("--format", "formats", type=click.Choice(["html", "md", "both", "doc", "docx"]), default="html",
+              show_default=True, help="doc / docx: the full performance report in Word (97–2003 or current), in the "
+                                       "company template set in the web app's Settings; .doc needs LibreOffice.")
 @click.option("--out", default=None, metavar="PATH", help="File or folder to write to (default: the run's folder).")
 @_CH_OPTION
 def labels(run_ref, label, limit, formats, out, clickhouse_url):

@@ -158,6 +158,16 @@ def _env():
     return env
 
 
+def _rel_level(v: float | None, unit: str) -> str:
+    from projectstack.results.server_load import fmt_value
+    return fmt_value(v, unit)
+
+
+def _rel_value(r: float | None, label: str | None) -> str:
+    """A relation cell: "strong · 0.96", or "—" when it could not be worked out."""
+    return "—" if r is None else f"{label} · {r:.2f}"
+
+
 def _server_value(v: Any, unit: str) -> str:
     if v is None:
         return "—"
@@ -197,7 +207,8 @@ def _evidence(ev: dict[str, Any]) -> tuple[list[tuple[str, Any]], list[dict[str,
     return scalars, tables
 
 
-def context(doc: dict, narrative: Narrative, audience: str, highlights: Narrative | None = None) -> dict[str, Any]:
+def context(doc: dict, narrative: Narrative, audience: str, highlights: Narrative | None = None,
+            shots: dict[str, Any] | None = None, server_relation: dict[str, Any] | None = None) -> dict[str, Any]:
     from projectstack.results import highlights as hl
     highlights = highlights or hl.from_rules(doc)
     run, sla = doc["run"], doc.get("sla", {})
@@ -247,17 +258,23 @@ def context(doc: dict, narrative: Narrative, audience: str, highlights: Narrativ
         "baseline": doc.get("baseline"),
         "server": doc.get("server"),
         "server_value": _server_value,
+        "shots": shots,
+        "server_relation": server_relation,
+        "rel_value": _rel_value,
+        "rel_level": _rel_level,
         "regressions": [f for f in findings if f["type"] == "regression"],
     }
 
 
 def render(doc: dict, narrative: Narrative, audience: str, out_format: str,
-           highlights: Narrative | None = None) -> str:
+           highlights: Narrative | None = None, shots: dict[str, Any] | None = None,
+           server_relation: dict[str, Any] | None = None) -> str:
     from markupsafe import Markup
-    ctx = context(doc, narrative, audience, highlights)
+    ctx = context(doc, narrative, audience, highlights, shots, server_relation)
     if out_format == "html":
         ctx["chart"] = Markup(chart.timeline_svg(doc)) if audience == "tech" else ""
         ctx["chart_script"] = Markup(chart.SCRIPT)
+        ctx["relation_chart"] = lambda rel: Markup(chart.relation_svg(doc, rel))
     return _env().get_template(f"report_{audience}.{out_format}.j2").render(**ctx)
 
 
@@ -275,6 +292,9 @@ def build_report(ref: str, *, audience: str = "tech", formats: tuple[str, ...] =
         raise ReportError(f"--audience must be one of {', '.join(AUDIENCES)}")
     settings = settings or load_settings()
     folder, doc = locate(ref, Path(settings["runs_dir"]), resolve_in_db)
+    from projectstack.results import jmeter_stats
+    from projectstack.results.db import connect
+    doc = jmeter_stats.ensure_total(doc, folder, lambda: connect(settings))
     narrative, reused, warnings = get_narrative(doc, folder, audience, use_llm=use_llm, provider_spec=provider_spec,
                                                 strict=strict, fresh=fresh, settings=settings, progress=progress)
     from projectstack.results import highlights as hl
@@ -282,9 +302,14 @@ def build_report(ref: str, *, audience: str = "tech", formats: tuple[str, ...] =
     section, _, h_warnings = hl.get(doc, folder, test_context, use_llm=use_llm, provider_spec=provider_spec,
                                     strict=strict, fresh=fresh, settings=settings, progress=progress)
     report = Report(doc["run"]["run_id"], audience, narrative, reused=reused, warnings=warnings + h_warnings)
+    from projectstack.results import screenshots, server_load
+    from projectstack.results.cloud.analysis import read as read_server
+    server_relation = server_load.from_cloud(read_server(folder), doc) if doc.get("server") else None
     for f in formats:
-        text = render(doc, narrative, audience, f, section)
         target = _target(out, folder, audience, f, len(formats))
+        shots = screenshots.report_section(folder, doc, test_context, embed=f == "html",
+                                           link_from=target.parent if target else folder)
+        text = render(doc, narrative, audience, f, section, shots, server_relation)
         if target is None:
             report.stdout = text
             continue

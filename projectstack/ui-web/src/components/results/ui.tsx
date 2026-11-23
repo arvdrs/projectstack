@@ -9,7 +9,7 @@ export const spin: React.CSSProperties = { animation: 'spin 1s linear infinite' 
 
 export function Card({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
   return (
-    <div style={{ background: 'var(--glass), var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: '20px', padding: '24px', boxShadow: '0 20px 40px -24px rgba(0,0,0,0.6)', ...style }}>
+    <div style={{ background: 'var(--glass), var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: '20px', padding: '24px', boxShadow: '0 20px 40px -24px rgba(var(--shadow-rgb),0.6)', ...style }}>
       {children}
     </div>
   )
@@ -30,7 +30,7 @@ export function Btn({ children, onClick, disabled, variant = 'primary', small = 
 }) {
   const styles: Record<string, React.CSSProperties> = {
     primary: { background: 'var(--accent-gradient)', color: '#fff', border: 'none', boxShadow: '0 6px 20px -8px rgba(var(--accent-rgb),0.7)' },
-    ghost: { background: 'rgba(255,255,255,0.05)', color: 'var(--text-primary)', border: '1px solid var(--border-strong)' },
+    ghost: { background: 'rgba(var(--fg-rgb),0.05)', color: 'var(--text-primary)', border: '1px solid var(--border-strong)' },
     danger: { background: 'rgba(var(--danger-rgb),0.1)', color: 'var(--danger)', border: '1px solid rgba(var(--danger-rgb),0.3)' },
   }
   return (
@@ -66,12 +66,12 @@ export const VERDICT: Record<string, { label: string; color: string; rgb: string
   pass: { label: 'Passed', color: 'var(--success)', rgb: 'var(--success-rgb)', Icon: CheckCircle },
   at_risk: { label: 'At risk', color: 'var(--warning)', rgb: 'var(--warning-rgb)', Icon: AlertTriangle },
   fail: { label: 'Failed', color: 'var(--danger)', rgb: 'var(--danger-rgb)', Icon: XCircle },
-  no_sla: { label: 'No SLA defined', color: 'var(--text-secondary)', rgb: '255,255,255', Icon: MinusCircle },
-  unknown: { label: 'No verdict', color: 'var(--text-muted)', rgb: '255,255,255', Icon: MinusCircle },
+  no_sla: { label: 'No SLA defined', color: 'var(--text-secondary)', rgb: 'var(--fg-rgb)', Icon: MinusCircle },
+  unknown: { label: 'No verdict', color: 'var(--text-muted)', rgb: 'var(--fg-rgb)', Icon: MinusCircle },
 }
 
 export function VerdictBadge({ verdict, big = false }: { verdict: RunVerdict | string; big?: boolean }) {
-  const v = VERDICT[verdict] ?? { label: verdict || 'Unknown', color: 'var(--text-muted)', rgb: '255,255,255', Icon: MinusCircle }
+  const v = VERDICT[verdict] ?? { label: verdict || 'Unknown', color: 'var(--text-muted)', rgb: 'var(--fg-rgb)', Icon: MinusCircle }
   return (
     <span style={{
       display: 'inline-flex', alignItems: 'center', gap: '6px', borderRadius: '999px', whiteSpace: 'nowrap',

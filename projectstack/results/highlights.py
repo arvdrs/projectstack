@@ -10,9 +10,10 @@ endpoint does or which limits apply; every number it writes is checked against
 findings.json, the computed facts and the notes. The statistics list is always
 computed, never written by a model.
 
-Totals (requests, errors, throughput) cover the whole run, as a JMeter summary of
-the file would; response times cover the steady state, like the rest of the
-analysis.
+Totals (requests, errors, throughput) are the Total row of JMeter's HTML report
+for the file (jmeter_stats): the whole run, requests with their sub-requests,
+throughput over their own first-to-last time. Response times cover the steady
+state, like the rest of the analysis.
 """
 
 from __future__ import annotations
@@ -206,7 +207,16 @@ def test_type(doc: dict[str, Any], profile: dict[str, Any], given: str = "") -> 
 
 
 def totals(doc: dict[str, Any]) -> dict[str, Any]:
-    """Requests, errors and average throughput over the whole run (summed from the timeline)."""
+    """Requests, errors and average throughput over the whole run: the Total row of JMeter's HTML report.
+
+    findings.json written before that row was kept in it falls back to the timeline's sums (requests
+    without their sub-requests, over the run's duration).
+    """
+    jt = doc.get("jmeter_total") or {}
+    if jt.get("samples"):
+        return {"requests": int(jt["samples"]), "errors": int(jt["errors"]),
+                "error_pct": round(float(jt["error_pct"]), 3), "throughput_per_s": round(float(jt["tps"]), 2),
+                "duration_s": round(float(doc["run"].get("duration_s") or 0), 1), "scope": "whole run"}
     points = (doc.get("timeline") or {}).get("points") or []
     requests = sum(int(p.get("samples") or 0) for p in points)
     errors = sum(int(p.get("errors") or 0) for p in points)
@@ -474,8 +484,11 @@ def observations(doc: dict[str, Any], f: dict[str, Any]) -> list[str]:
     out += [x for x in (_latency(doc, f),) if x]
     out += _sla(doc)
     out += _endpoint_points(doc, f)
-    out += [_plain(x) for x in doc.get("findings", [])
-            if x["type"] in _OTHER_FINDINGS and x["severity"] in ("critical", "warning")][:2]
+    # Two findings can read the same in plain words (a login redirect and a later 401 both mean the
+    # session was not carried along): say it once
+    others = dict.fromkeys(_plain(x) for x in doc.get("findings", [])
+                           if x["type"] in _OTHER_FINDINGS and x["severity"] in ("critical", "warning"))
+    out += [x for x in others if x not in out][:2]
     return out[:MAX_OBSERVATIONS]
 
 

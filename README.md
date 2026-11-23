@@ -9,6 +9,9 @@ test plans with automatic correlation, runs them, and analyses the results.
   http://localhost:6292. See [Run it directly](#run-it-directly) for creating `.venv` once.
 - CLI: in the same virtual environment, `pstack --help`
 
+The web app has a light and a dark mode: the sun/moon button in the top bar switches between them,
+and **Settings → Appearance** also offers *Match system*. The choice is kept per browser.
+
 ## Run with Docker
 
 The quickest way to run ProjectStack on your own computer. One command starts the web app
@@ -224,6 +227,16 @@ the raw samples; nothing is estimated by a model.
   number it writes is checked against them; the AI version is saved, so switching back to it is instant
   and **Rewrite** asks for a new one. **Copy** puts the version on screen on the clipboard as plain text.
 
+- **Download**: the **Download** menu on a run's page saves the analysis as a file: the
+  **performance report in Word** (.doc, or .docx, in your company template — see
+  [Word reports in your company template](#word-reports-in-your-company-template)), the **technical
+  report** as one HTML file with everything in it (highlights, timeline, findings, tables, server
+  metrics, the screenshots themselves and their comparison with the load test, as a chart and a
+  table), the **executive summary** or the **requests & transactions** report as HTML, or the
+  technical report as Markdown. The HTML files load nothing from elsewhere, so they open offline and
+  can be emailed or attached as they are; they follow the reader's light or dark mode and print
+  cleanly. Files are named after the scenario and run (`Checkout_20261117-0441_technical-report.html`).
+  With **AI narrative** ticked, the AI-written text is used.
 - **Per request and transaction**: click any label on a run's page (or search for it among all the
   run's labels) for its own page: a plain-language summary and a status (needs action / worth a look /
   healthy), its timeline with p50/p95/p99, the response-time distribution, percentiles, where the time
@@ -238,10 +251,21 @@ the raw samples; nothing is estimated by a model.
   connections, latency, errors and capacity from AWS CloudWatch or Azure Monitor for the run's
   window and charts them under the test's p95. Server problems join the findings, linked to the
   slowdowns they coincide with. See [Server metrics from AWS and Azure](#server-metrics-from-aws-and-azure).
+- **Server metrics screenshots**: attach screenshots of CPU, memory, connections and so on from any
+  monitoring tool (Grafana, CloudWatch, New Relic, Datadog …) to a run — drop them, choose them, or
+  paste one with Ctrl+V — and **Read with AI** has a vision model write observations per screenshot
+  and for the servers overall, lined up with the test's load steps. See
+  [Server metrics from screenshots](#server-metrics-from-screenshots).
+- **Server metrics vs the load test**: with server metrics from either source, the run's page draws
+  the load test's graph (active users, throughput, p95, errors) with the server metrics under it on
+  one clock, and says for each server metric whether it followed the load, moved with the response
+  times or with the errors, and whether it kept climbing under flat load. See
+  [Server metrics vs the load test](#server-metrics-vs-the-load-test).
 
 Both need the local ClickHouse (below); the page shows the command to start it when it is not
 running. Nothing is sent to an AI service unless you choose **With AI** in Performance Highlights &
-Observations, tick **AI narrative** for a report, or ask a question.
+Observations, tick **AI narrative** for a report, **Read with AI** in Server metrics screenshots, or
+ask a question.
 
 ### Setup
 
@@ -377,6 +401,8 @@ pstack report 20261013-0845 --audience exec       # one-page summary for decisio
 pstack report 20261013-0845 --format both         # report_tech.html and report_tech.md
 pstack report 20261013-0845 --no-llm              # rule-based text; nothing leaves the machine
 pstack report runs/…/findings.json --out -        # from a published artifact, Markdown to stdout
+pstack report 20261013-0845 --format doc          # the performance report in Word 97–2003, in the company template
+pstack report 20261013-0845 --format docx         # the same in the current Word format
 ```
 
 A report is built from the run's `findings.json` alone, so it needs no database
@@ -385,9 +411,11 @@ verdict and SLA checks, the Performance Highlights & Observations, a timeline ch
 rate as four panels on one time axis, with finding windows and the steady state
 shaded; hover for values, or open the table under it), per-transaction and
 per-request tables, every finding with its evidence, likely root causes ranked by
-confidence, recommended next tests and the top errors. The **executive** summary
+confidence, recommended next tests and the top errors, and the run's server
+metrics screenshots with what the AI read from them. The **executive** summary
 is one page: verdict, headline, four figures, the Performance Highlights &
-Observations, business impact and the recommended action. HTML reports are single
+Observations, the AI's overall reading of the server screenshots (when there is
+one), business impact and the recommended action. HTML reports are single
 self-contained files (no external assets) and follow the system's light or dark mode.
 
 The detectors decide; the AI only explains. The narrative text (summary,
@@ -438,6 +466,71 @@ list is always computed, never AI-written. The AI version is saved as
 `narrative_highlights.json` (prompt `report_highlights`) and reused while
 `findings.json`, the context and the prompt are unchanged.
 
+### Word reports in your company template
+
+**Download → Performance report · Word (.doc)** on a run's page (or `pstack report <run> --format doc`)
+writes the full report as a Word 97–2003 document; **Word (.docx)** (`--format docx`) writes the same
+report in the current Word format, for Google Docs and newer Word. Either way it is a Word document in numbered sections that follow the client report it was
+modelled on: 1. Executive Summary, 2. Test Scope, 3. Load Profile & Test Approach, 4. Performance
+Highlights & Observations, 5. Response Times (SLA, transactions, requests, baseline), 6. Server Metrics
+(cloud metrics, screenshots with what the AI read, and the comparison with the load test), 7. Findings
+(with likely root causes), 8. Recommendations, 9. Top Errors, and About this report. Charts are
+pictures; the screenshots are embedded. With **AI narrative** ticked, the AI-written text is used.
+
+**.doc needs LibreOffice.** The report is written as .docx and LibreOffice converts it to .doc,
+headless and with a throwaway profile (it never touches a LibreOffice window you have open). Install
+it once — it is already in the Docker image:
+
+```bash
+sudo apt install --no-install-recommends libreoffice-writer-nogui     # Debian / Ubuntu, about 160 MB
+```
+
+It is found on the `PATH` (`soffice`, `libreoffice`) or in the usual install folders; set
+`libreoffice_path` in `~/.projectstack_settings.json` for another location. Settings shows whether it
+was found; without it the .doc download says so and .docx still works.
+
+To make it look like your company's reports, upload your Word template in **Settings → Report template
+(Word)** (.doc, .docx or .dotx — a .doc template is converted with LibreOffice; **Starter template**
+downloads a plain one to restyle). The report is built
+inside it, keeping its fonts, colours, heading, list and table styles, page setup, cover page, header,
+footer and logo:
+
+- A paragraph holding only `[[REPORT]]` marks where the report goes. Without it, the report follows the
+  template's own content on a new page.
+- Placeholders are filled in anywhere — cover page, header, footer, tables: `{{scenario}}`, `{{run_id}}`,
+  `{{tag}}`, `{{test_date}}`, `{{test_window}}`, `{{duration}}`, `{{peak_users}}`, `{{region}}`,
+  `{{test_type}}`, `{{verdict}}`, `{{total_requests}}`, `{{error_rate}}`, `{{throughput}}`, `{{p95}}`,
+  `{{report_date}}`, `{{generated_by}}`. Unknown ones are left as they are, and Settings lists them.
+- Headings use the template's Heading 1–3 and are numbered in the text ("4. …") unless its Heading 1
+  numbers itself; tables use its *Table Grid* style (plain borders otherwise); bullets *List Bullet*.
+
+The template is kept next to the runs folder (`~/.projectstack/templates/report_template.docx`), so the
+CLI and every run use it.
+
+### A new report in the format of a past one (preview)
+
+`pstack create-report` takes a finished report from an earlier test cycle (a .docx: the
+*blueprint*) and analysed runs — one per region or test — and writes a new report in exactly the
+blueprint's format:
+
+```bash
+pstack create-report "Performance Test Report Nov 2026.docx" \
+    20261105-0530="Incremental Load Test - US region" \
+    20261105-0707="Incremental Load Test - CA region" \
+    --out "Performance Test Report Dec 2026.docx"          # or .doc / .pdf (LibreOffice)
+```
+
+| Part of the blueprint | In the new report |
+|---|---|
+| Cover, attention notice, authorisation, sections before *Performance Highlights & Observations*, header, footer, fonts, styles | kept |
+| Month on the cover, date in the version table, users per journey in the workload table (from the runs' thread groups), table of contents | updated (Word refreshes the contents when the file is opened) |
+| One *4.x* subsection per run: heading, highlight bullets (bold figures), Performance Metrics (JMeter's Aggregate Report columns, whole run), Running Vusers, Hits Per Second, Throughput and Response Time graphs, Server Metrics screenshots with the AI's reading | rebuilt from each run, by cloning the blueprint's first subsection |
+| Tuning Recommendations, Conclusion | drafted from the findings and figures — review them |
+
+`--ai` uses AI-written highlights (with the run's test notes). A run without server metrics
+screenshots gets a highlighted placeholder in its Server Metrics block. A .doc keeps everything but
+the blueprint's embedded fonts (readers need them installed); .docx and .pdf keep them.
+
 | Exit code | Meaning |
 |---|---|
 | 0 | Report written (whatever the run's verdict) |
@@ -479,22 +572,27 @@ tools)`). Each task picks its provider separately:
 |---|---|
 | `correlation` | the provider chosen in the web app (`ai_provider`) |
 | `report`, `ask` | Claude (`claude-opus-5-5`) when an Anthropic key is set (`anthropic_api_key` or `ANTHROPIC_API_KEY`), otherwise Gemini when a Gemini key is set, otherwise `ai_provider` |
+| `screenshots` | the same as `report`; the web app lets you pick any provider here that can read images |
 
 Override per task or per provider model in `~/.projectstack_settings.json`:
 
 ```json
 {
-  "llm_tasks":  "{\"report\": \"claude\", \"ask\": \"claude\", \"correlation\": \"ollama/mistral\"}",
-  "llm_models": "{\"claude\": \"claude-opus-5-5\", \"groq\": \"llama-3.3-70b-versatile\"}"
+  "llm_tasks":  "{\"report\": \"claude\", \"ask\": \"claude\", \"correlation\": \"ollama/mistral\", \"screenshots\": \"ollama/gemma4\"}",
+  "llm_models": "{\"claude\": \"claude-opus-5-5\", \"groq\": \"openai/gpt-oss-120b\"}"
 }
 ```
 
-or for one report: `pstack report <run> --provider groq/llama-3.3-70b-versatile`.
-Tool calling (used by `ask`) works with all five providers.
+or for one report: `pstack report <run> --provider groq/openai/gpt-oss-120b`.
+Tool calling (used by `ask`) works with all five providers. Groq's default is `openai/gpt-oss-120b`
+(Groq retired Llama 3.3 70B in 2026). Reading screenshots needs a model that can see images
+(`complete(system, prompt, images=[…])`): Claude, Gemini and OpenAI's default models can; on Groq,
+`qwen/qwen3.8-27b` is offered when your key lists it; on Ollama only vision models (gemma4, qwen3-vl,
+gemma3 …) are offered.
 Claude requests use structured outputs (the JSON schema is enforced) with medium
 effort; the other providers are asked for JSON and their answers are validated and
 reshaped. Prompts are versioned files in `projectstack/llm/prompts/`
-(`report_tech.v1.md`, `report_exec.v1.md`, `correlation_detect.v1.md`); a change
+(`report_tech.v1.md`, `report_exec.v1.md`, `server_screenshots.v1.md`, `correlation_detect.v1.md`); a change
 to a prompt is a new version file, and each report records the version it used.
 
 ### Compare runs
@@ -616,6 +714,85 @@ findings and a per-resource summary in `findings.json`, never the series.
 **Retention**: CloudWatch keeps 1-minute values for 15 days, 5-minute values for 63 days and hourly
 values for 15 months, so fetch soon after the test; ProjectStack uses the finest resolution still
 available. Azure Monitor keeps platform metrics for 93 days.
+
+### Server metrics from screenshots
+
+When the servers are not in AWS or Azure monitoring that ProjectStack can query — or the dashboards
+are already open in Grafana, New Relic, Datadog, Dynatrace or a cloud console — attach screenshots to
+the run instead, in the **Server metrics screenshots** card of a run's page: drop them, choose them,
+or paste one with Ctrl+V (PNG, JPEG, WebP or GIF; up to 20 per run, 10 MB each). A caption such as
+"CPU – app servers" helps the AI and appears in the report.
+
+**Read with AI** sends the screenshots to the provider you pick next to the button, together with the
+run's window, ramp-up steps, steady state and a per-minute table of users, throughput, p95 and error
+rate (in UTC and in your browser's time zone, since dashboards usually show local time), the
+findings, and the test notes. For each screenshot it returns what it shows, the time range on its
+axis and where the test falls on it (with a warning when a chart does not cover the test), and what
+happened during the test; then overall observations on headroom, the resource closest to its limit,
+and whether server metrics moved with the slowdowns or errors the test saw. Figures about the servers
+are read from the images, so check them against the screenshots; the page and the reports say so.
+
+Which provider reads them is your choice: a cloud model with a key in Settings (Gemini, Claude,
+OpenAI, or Groq's open-weight vision model Qwen 3.8 — the screenshots leave the machine), or a vision
+model in Ollama, which keeps everything on this machine but needs the model to fit in free memory
+(gemma4 needs about 10 GB) and takes minutes on a CPU. The default is `llm_tasks.screenshots`, else
+the provider reports use.
+
+**How a reading runs.** It runs in the background (the page shows progress and picks it up again
+after a reload): first, with Gemini, every Flash model gets a one-word request at once, and the ones
+that are out of quota or not answering are skipped; then the screenshots are read three per request,
+two requests at a time (one at a time on Groq, whose free tier counts tokens per minute, and one
+screenshot at a time on Ollama); last, a text-only request writes the overall observations from the
+readings and the comparison with the load test. Requests with pictures stream the answer, so a model
+that sends nothing for 45 seconds is dropped for the next one instead of holding the reading up, and
+Gemini is given the answer's JSON Schema, so its answers are always valid JSON. A batch that fails is
+read again one screenshot at a time; a screenshot that still fails is marked, the others are kept, and
+**Retry failed** reads only those.
+
+Files are kept in the run's folder: `screenshots/` (the images as uploaded and `index.json` with
+names and captions) and `narrative_screenshots.json` (the reading, its provider, prompt version and
+token usage). The reading is reused until a screenshot, a caption, the test notes or `findings.json`
+changes; then the page marks it out of date, reports leave it out, and **Read again** reads the
+screenshots that changed (**Read all again** reads every one). The technical report shows the screenshots (scaled to 1,600 px and embedded, so the HTML stays a
+single file) with the reading; the executive summary carries the overall observations only.
+
+### Server metrics vs the load test
+
+Server metrics only help when they are read against the test. For metrics fetched from AWS or Azure,
+and for the lines the AI reads off screenshots, ProjectStack compares every server metric minute by
+minute with the test's own timeline and shows the result under **Server metrics vs the load test**:
+the load test's graph (active users, throughput, p95 and the error rate) with the server metrics
+under it on the same clock (each server in one colour in every panel), a table, and observations such as
+
+- *CPU · app-server-1 (r 0.97, about 60% at 50 users) and CPU · app-server-2 (r 0.97, about 51% at
+  50 users) followed the load: they rose with the users through the ramp-up and held steady with them.*
+- *During the steady state, while the load was flat, the p95 response time and CPU · orders-db rose
+  and fell together (r 1.00): this server metric is the likeliest place to look for what slowed
+  responses.*
+- *The error rate rose together with CPU · orders-db (r 0.61).*
+- *Memory used · app-server-1 rose with the load and kept rising during the steady state although the
+  load was flat (about 48% to 52%): worth watching on a longer test.*
+
+| Column | How it is worked out |
+|---|---|
+| With the load | Pearson r with the active users over the whole test, ramp-up included |
+| With p95 response time | r with p95 over the **steady state**, where the load is flat, so the two simply growing with the users does not count (over the whole test, marked, when the steady state has too few points) |
+| With errors | r with the error rate, when the test had errors |
+| Under flat load | the steady state's last quarter against its first: rising or falling by 3 points or more for a percentage, 10% of the level otherwise |
+
+Strong means |r| ≥ 0.7 and moderate ≥ 0.4; a metric that hardly moves is *flat* and gets no r.
+Server values that cover a longer period (5-minute CloudWatch values) are compared with the test's
+average over the same minutes. The observations are written from these numbers by rules, so they are
+the same every time and nothing extra is sent to an AI. Correlation shows what moved together, not
+what caused it.
+
+For screenshots, the AI reads every line's value at up to 30 times across the test (the times are
+given to it in UTC and in your local time, and it says which clock the chart uses); charts that do not
+cover the test are left out. Those values are approximate, which is why they are drawn over the test's
+graph: compare the lines with your screenshots. The technical report has the observations and the
+table, under a chart of the test's users and p95 with the server lines beneath, in the Server metrics
+section (AWS/Azure) and in Server metrics from screenshots; the executive summary has the observations
+for screenshots.
 
 ### CI mode
 

@@ -9,7 +9,7 @@ import { useMemo, useState } from 'react'
 import type { AnalysisFinding, TimelinePoint } from '../../api/client'
 import { fmtNum, fmtOffset, fmtPct, num, td, th } from './ui'
 
-const W = 760, LEFT = 52, RIGHT = 14, PANEL_H = 74, GAP = 34, TOP = 46, AXIS_H = 24
+const W = 1000, LEFT = 52, RIGHT = 14, PANEL_H = 74, GAP = 34, TOP = 46, AXIS_H = 24
 const PANELS: { key: keyof TimelinePoint; title: string; floor: number; fmt: (v: number) => string }[] = [
   { key: 'users', title: 'Active users', floor: 1, fmt: v => fmtNum(v) },
   { key: 'tps', title: 'Throughput (requests/s)', floor: 1, fmt: v => fmtNum(v, 1) },
@@ -83,7 +83,7 @@ export default function Timeline({ points, bucketS, durationS, steady, findings,
   return (
     <div>
       <div style={{ position: 'relative', overflowX: 'auto' }}>
-        <svg viewBox={`0 0 ${W} ${height}`} role="img" style={{ width: '100%', minWidth: '560px', height: 'auto', display: 'block' }}
+        <svg viewBox={`0 0 ${W} ${height}`} role="img" style={{ width: '100%', minWidth: '720px', height: 'auto', display: 'block' }}
           aria-label="Active users, throughput, p95 response time and error rate over the run, with finding windows shaded">
           {/* band labels row */}
           {(() => {
@@ -108,7 +108,7 @@ export default function Timeline({ points, bucketS, durationS, steady, findings,
                 {showSteady && (
                   <rect x={geo.x(Math.max(geo.x0, steady!.start_offset_s))} y={y0}
                     width={Math.max(0, geo.x(Math.min(geo.x1, steady!.end_offset_s)) - geo.x(Math.max(geo.x0, steady!.start_offset_s)))}
-                    height={PANEL_H} fill="rgba(255,255,255,0.05)" />
+                    height={PANEL_H} fill="rgba(var(--fg-rgb),0.05)" />
                 )}
                 {geo.bands.map(b => (
                   <rect key={b.n} x={geo.x(b.a)} y={y0} width={Math.max(2, geo.x(b.b) - geo.x(b.a))} height={PANEL_H}
@@ -117,7 +117,7 @@ export default function Timeline({ points, bucketS, durationS, steady, findings,
                 {[0, 0.5, 1].map(f => (
                   <g key={f}>
                     <line x1={LEFT} x2={W - RIGHT} y1={y(top * f)} y2={y(top * f)}
-                      stroke={f === 0 ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.07)'} />
+                      stroke={f === 0 ? 'rgba(var(--fg-rgb),0.22)' : 'rgba(var(--fg-rgb),0.07)'} />
                     <text x={LEFT - 8} y={y(top * f) + 4} fontSize="10" textAnchor="end" fill="var(--text-muted)"
                       style={{ fontVariantNumeric: 'tabular-nums' }}>{tick(top * f)}</text>
                   </g>
@@ -159,7 +159,7 @@ export default function Timeline({ points, bucketS, durationS, steady, findings,
           <div style={{
             position: 'absolute', top: 8, left: `calc(${(hx / W) * 100}% + ${hx / W > 0.7 ? '-190px' : '12px'})`,
             pointerEvents: 'none', background: 'var(--bg-surface)', border: '1px solid var(--border-strong)', borderRadius: '10px',
-            padding: '8px 12px', fontSize: '12px', lineHeight: 1.6, boxShadow: '0 8px 24px rgba(0,0,0,0.45)', whiteSpace: 'nowrap',
+            padding: '8px 12px', fontSize: '12px', lineHeight: 1.6, boxShadow: '0 8px 24px rgba(var(--shadow-rgb),0.45)', whiteSpace: 'nowrap',
           }}>
             <div style={{ color: 'var(--text-muted)' }}>{fmtOffset(hp.t_offset_s)}</div>
             {PANELS.map(p => (
@@ -170,7 +170,7 @@ export default function Timeline({ points, bucketS, durationS, steady, findings,
         )}
       </div>
       <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'center', marginTop: '8px', fontSize: '12px', color: 'var(--text-muted)' }}>
-        {showSteady && <span><span style={{ display: 'inline-block', width: 12, height: 9, borderRadius: 2, background: 'rgba(255,255,255,0.12)', marginRight: 6 }} />Steady state (statistics window)</span>}
+        {showSteady && <span><span style={{ display: 'inline-block', width: 12, height: 9, borderRadius: 2, background: 'rgba(var(--fg-rgb),0.12)', marginRight: 6 }} />Steady state (statistics window)</span>}
         {geo.bands.length > 0 && <span>#n: finding window, shaded by severity</span>}
         <span>{bucketS} s buckets</span>
         <button onClick={() => setShowTable(v => !v)} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', textDecoration: 'underline' }}>

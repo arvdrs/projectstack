@@ -7,7 +7,8 @@ import time
 from typing import Any
 
 from projectstack.llm.base import (
-    Completion, LLMConfigError, LLMError, Provider, ToolCall, ToolSpec, ToolTurn, schema_instruction,
+    Completion, Image, LLMConfigError, LLMError, Provider, ToolCall, ToolSpec, ToolTurn, image_label,
+    schema_instruction,
 )
 
 _GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
@@ -37,14 +38,18 @@ class GeminiProvider(Provider):
         return f"gemini/{self.model or 'flash (auto)'}"
 
     def complete(self, system: str, prompt: str, *, max_tokens: int = 8192,
-                 json_schema: dict | None = None, effort: str | None = None) -> Completion:
+                 json_schema: dict | None = None, effort: str | None = None,
+                 images: list[Image] | None = None) -> Completion:
         # The transport (model discovery, thinking settings, quota cooldowns) lives in llm_router
         from projectstack.correlator import llm_router
         if json_schema:
             system = f"{system}\n\n{schema_instruction(json_schema)}".strip()
+        pictures = [(image_label(i, im), im.media_type, im.b64) for i, im in enumerate(images or [], 1)]
         try:
             text = llm_router._gemini_generate(self.key, prompt, system or None, max_output_tokens=max_tokens,
-                                               json_mode=bool(json_schema), pin_model=self.model or None)
+                                               json_mode=bool(json_schema), pin_model=self.model or None,
+                                               images=pictures or None, json_schema=json_schema,
+                                               time_budget=300.0 if pictures else 150.0)
         except ValueError as exc:
             raise LLMConfigError(str(exc)) from exc
         except RuntimeError as exc:
@@ -53,6 +58,13 @@ class GeminiProvider(Provider):
         return Completion(text, self.name, getattr(llm_router._gemini_last, "model", "") or self.model or "gemini-flash",
                           "", usage.get("promptTokenCount"),
                           (usage.get("candidatesTokenCount") or 0) + (usage.get("thoughtsTokenCount") or 0) or None)
+
+    def warm_up(self) -> None:
+        # With an automatic model, skip the ones not answering right now (overloaded Flash models
+        # otherwise cost each request of a long job a wait before it moves on)
+        if not self.model:
+            from projectstack.correlator import llm_router
+            llm_router._gemini_probe(self.key)
 
     # -- tool use ------------------------------------------------------------
     # One model answers the whole conversation: Gemini's thought signatures are tied to it.
@@ -150,6 +162,13 @@ class GeminiProvider(Provider):
         return [{"role": "user", "parts": parts}]
 
 
+def _ollama_error(resp) -> str:
+    try:
+        return str(resp.json().get("error") or resp.text)[:300]
+    except ValueError:
+        return resp.text[:300]
+
+
 class OllamaProvider(Provider):
     name = "ollama"
     default_model = ""          # empty: the ollama_model setting
@@ -158,23 +177,60 @@ class OllamaProvider(Provider):
         super().__init__(settings, model or settings.get("ollama_model") or "mistral")
         self.url = (settings.get("ollama_url") or "http://localhost:11434").rstrip("/")
 
-    def complete(self, system: str, prompt: str, *, max_tokens: int = 8192,
-                 json_schema: dict | None = None, effort: str | None = None) -> Completion:
+    def capabilities(self) -> list[str] | None:
+        """What the model can do ("vision", "tools" …), or None when this Ollama cannot say."""
         import requests
-        if json_schema:
-            system = f"{system}\n\n{schema_instruction(json_schema)}".strip()
-        messages = ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": prompt}]
-        body: dict = {"model": self.model, "messages": messages, "stream": False,
-                      "options": {"temperature": 0, "num_predict": max_tokens}}
-        if json_schema:
-            body["format"] = "json"
         try:
-            resp = requests.post(f"{self.url}/api/chat", json=body, timeout=(5, 300))
+            resp = requests.post(f"{self.url}/api/show", json={"model": self.model}, timeout=(2, 10))
         except requests.ConnectionError as exc:
             raise LLMConfigError(f"Ollama is not running at {self.url} — start it or pick another provider") from exc
+        except requests.Timeout:
+            return None
         if resp.status_code == 404:
             raise LLMConfigError(f"Ollama has no model {self.model!r} — run: ollama pull {self.model}")
         if not resp.ok:
+            return None
+        caps = resp.json().get("capabilities")
+        return list(caps) if isinstance(caps, list) else None
+
+    def complete(self, system: str, prompt: str, *, max_tokens: int = 8192,
+                 json_schema: dict | None = None, effort: str | None = None,
+                 images: list[Image] | None = None) -> Completion:
+        import requests
+        if json_schema:
+            system = f"{system}\n\n{schema_instruction(json_schema)}".strip()
+        user: dict[str, Any] = {"role": "user", "content": prompt}
+        options: dict[str, Any] = {"temperature": 0, "num_predict": max_tokens}
+        if images:
+            caps = self.capabilities()
+            if caps is not None and "vision" not in caps:
+                raise LLMConfigError(f"The Ollama model {self.model!r} cannot read images — use a vision model "
+                                     "such as gemma4, qwen2.5vl or llama3.2-vision")
+            # Ollama takes the pictures as a list beside the text, so the labels go into the text
+            labels = "\n".join(f"{image_label(i, im)} is picture {i} of {len(images)}."
+                               for i, im in enumerate(images, 1))
+            user = {"role": "user", "content": f"{labels}\n\n{prompt}", "images": [im.b64 for im in images]}
+            # The default window is too small for pictures (hundreds of tokens each), but every extra token
+            # costs memory: size it to the request (≈3 characters a token, 1,024 per picture, room to answer)
+            need = (len(system) + len(user["content"])) // 3 + 1024 * len(images) + min(max_tokens, 3072)
+            options["num_ctx"] = min(32768, max(8192, -(-need // 2048) * 2048))
+        messages = ([{"role": "system", "content": system}] if system else []) + [user]
+        body: dict = {"model": self.model, "messages": messages, "stream": False, "options": options}
+        if json_schema:
+            body["format"] = "json"
+        try:
+            # Reading pictures on a CPU takes minutes
+            resp = requests.post(f"{self.url}/api/chat", json=body, timeout=(5, 900 if images else 300))
+        except requests.ConnectionError as exc:
+            raise LLMConfigError(f"Ollama is not running at {self.url} — start it or pick another provider") from exc
+        except requests.Timeout as exc:
+            raise LLMError(f"Ollama ({self.model}) did not answer in time — try fewer pictures or another model") from exc
+        if resp.status_code == 404:
+            raise LLMConfigError(f"Ollama has no model {self.model!r} — run: ollama pull {self.model}")
+        if not resp.ok:
+            if "more system memory" in resp.text:
+                raise LLMConfigError(f"Ollama cannot load {self.model} with this much to read: {_ollama_error(resp)} "
+                                     "— close other programs, attach fewer screenshots or use another provider")
             raise LLMError(f"Ollama error {resp.status_code}: {resp.text[:300]}")
         data = resp.json()
         return Completion(data.get("message", {}).get("content", ""), self.name, self.model,

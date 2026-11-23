@@ -9,6 +9,8 @@ setup(
         "requests>=2.28",
         "clickhouse-connect>=0.8",   # results analysis store
         "jinja2>=3.1",               # report templates
+        "python-docx>=1.1",          # Word reports, in a company template
+        "pillow>=10",                # charts drawn into Word reports; screenshots scaled for reports
     ],
     extras_require={
         # Server metrics from the cloud for results analysis (optional)

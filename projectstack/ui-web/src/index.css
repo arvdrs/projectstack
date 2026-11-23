@@ -2,8 +2,10 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Palette modelled on qburst.com: warm near-black, neutral grays, a single red accent */
+/* Palette modelled on qburst.com: warm near-black, neutral grays, a single red accent.
+   Dark is the default; <html data-theme="light"> switches to the light palette (see theme.ts). */
 :root {
+  color-scheme: dark;
   --bg-base: #100f0f;
   --bg-surface: #161515;
   --bg-elevated: #1c1b1b;
@@ -19,14 +21,14 @@
   --accent-rgb: 222, 83, 83;
   --accent-gradient: linear-gradient(135deg, #e04a4a 0%, #d62828 100%);
 
-  /* Chart series (validated dark-mode categorical steps; status colours stay reserved) */
+  /* Chart series: validated categorical steps per mode, same hue per slot in both */
   --series-1: #3987e5;
   --series-2: #d95926;
   --series-3: #199e70;
   --series-4: #c98500;
   --series-5: #d55181;
-  --series-6: #9085e9;
-  --series-7: #008300;
+  --series-6: #008300;
+  --series-7: #9085e9;
   --series-8: #e66767;
   --success: #3ccf7a;
   --success-rgb: 60, 207, 122;
@@ -37,9 +39,98 @@
   --info: #6ea8fe;
   --info-rgb: 110, 168, 254;
 
+  /* Ink for overlays, hover washes and hairlines: rgba(var(--fg-rgb), alpha) */
+  --fg-rgb: 255, 255, 255;
+  --base-rgb: 16, 15, 15;
+  --shadow-rgb: 0, 0, 0;
+  --surface-rgb: 28, 27, 27;
+  --nav-bg: rgba(16, 15, 15, 0.72);
+  --sidebar-bg: rgba(22, 21, 21, 0.6);
+  --toggle-off: #30363d;
+  --glow-strong: 0.10;
+  --glow-soft: 0.06;
+  --hero-from: #ffffff;
+  --hero-mid: #f4a3a3;
+
+  /* Accent hues for badges, HTTP methods and correlation sources (text-safe in each mode) */
+  --c-blue: #58a6ff;
+  --c-green: #3ccf7a;
+  --c-yellow: #d29922;
+  --c-yellow-rgb: 210, 153, 34;
+  --c-orange: #f0883e;
+  --c-amber: #e36209;
+  --c-amber-rgb: 227, 98, 9;
+  --c-red: #f85149;
+  --c-purple: #d2a8ff;
+  --c-violet: #a78bfa;
+  --c-violet-rgb: 139, 92, 246;
+  --c-cyan: #39c5cf;
+
   --glass: linear-gradient(135deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%);
   --font-sans: 'General Sans', 'Open Sans', -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg-base: #f4f3f1;
+  --bg-surface: #faf9f8;
+  --bg-elevated: #ffffff;
+  --border: rgba(16, 15, 15, 0.12);
+  --border-strong: rgba(16, 15, 15, 0.22);
+  --text-primary: #161515;
+  --text-secondary: #474343;
+  --text-muted: #6b6767;
+
+  --accent: #c83737;
+  --accent-hover: #ab2020;
+  --accent-dim: #8f1b1b;
+  --accent-rgb: 200, 55, 55;
+  --accent-gradient: linear-gradient(135deg, #cf3a3a 0%, #b92222 100%);
+
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #6250d6;
+  --series-8: #e34948;
+  --success: #1a7f37;
+  --success-rgb: 26, 127, 55;
+  --warning: #8a5c00;
+  --warning-rgb: 138, 92, 0;
+  --danger: #cf222e;
+  --danger-rgb: 207, 34, 46;
+  --info: #0969da;
+  --info-rgb: 9, 105, 218;
+
+  --fg-rgb: 16, 15, 15;
+  --base-rgb: 244, 243, 241;
+  --shadow-rgb: 70, 55, 55;
+  --surface-rgb: 255, 255, 255;
+  --nav-bg: rgba(255, 255, 255, 0.8);
+  --sidebar-bg: rgba(255, 255, 255, 0.72);
+  --toggle-off: #c9c4c1;
+  --glow-strong: 0.08;
+  --glow-soft: 0.05;
+  --hero-from: #161515;
+  --hero-mid: #b03838;
+
+  --c-blue: #0969da;
+  --c-green: #1a7f37;
+  --c-yellow: #8a5c00;
+  --c-yellow-rgb: 138, 92, 0;
+  --c-orange: #bc4c00;
+  --c-amber: #bc4c00;
+  --c-amber-rgb: 188, 76, 0;
+  --c-red: #cf222e;
+  --c-purple: #8250df;
+  --c-violet: #6639ba;
+  --c-violet-rgb: 102, 57, 186;
+  --c-cyan: #176f75;
+
+  --glass: linear-gradient(135deg, rgba(255, 255, 255, 0.9) 0%, rgba(255, 255, 255, 0.6) 100%);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -55,8 +146,8 @@ html, body, #root {
 /* Soft red glow behind the content, as on the reference site */
 body {
   background:
-    radial-gradient(900px 500px at 85% -10%, rgba(var(--accent-rgb), 0.10), transparent 60%),
-    radial-gradient(700px 400px at -10% 110%, rgba(var(--accent-rgb), 0.06), transparent 60%),
+    radial-gradient(900px 500px at 85% -10%, rgba(var(--accent-rgb), var(--glow-strong)), transparent 60%),
+    radial-gradient(700px 400px at -10% 110%, rgba(var(--accent-rgb), var(--glow-soft)), transparent 60%),
     var(--bg-base);
   background-attachment: fixed;
 }
@@ -70,14 +161,18 @@ code, pre, kbd { font-family: var(--font-mono); }
 /* Scrollbar */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 8px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
+::-webkit-scrollbar-thumb { background: rgba(var(--fg-rgb), 0.12); border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(var(--fg-rgb), 0.24); }
 
 /* Focus ring */
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* Transitions */
 a, button { transition: all 0.2s ease; }
+/* Switching theme: colours change together, briefly (theme.ts sets this class for one frame pair) */
+html.theme-switching, html.theme-switching *, html.theme-switching *::before, html.theme-switching *::after {
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, fill 0.2s ease, stroke 0.2s ease !important;
+}
 
 /* Selection */
 ::selection { background: rgba(var(--accent-rgb), 0.3); }

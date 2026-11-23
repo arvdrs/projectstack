@@ -31,3 +31,8 @@ sample_postman.json
 # Docker: files exchanged with the CLI in the container
 /workspace/*
 !/workspace/.gitkeep
+
+# Client reports and other Word or PDF documents dropped into the project folder (never commit client data)
+/*.docx
+/*.doc
+/*.pdf

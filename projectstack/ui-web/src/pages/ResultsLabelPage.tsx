@@ -17,7 +17,7 @@ const STATUS: Record<LabelStatus, { label: string; color: string; rgb: string; I
   critical: { label: 'Needs action', color: 'var(--danger)', rgb: 'var(--danger-rgb)', Icon: AlertOctagon },
   attention: { label: 'Worth a look', color: 'var(--warning)', rgb: 'var(--warning-rgb)', Icon: AlertTriangle },
   healthy: { label: 'Healthy', color: 'var(--success)', rgb: 'var(--success-rgb)', Icon: CheckCircle },
-  idle: { label: 'Idle', color: 'var(--text-muted)', rgb: '255,255,255', Icon: MinusCircle },
+  idle: { label: 'Idle', color: 'var(--text-muted)', rgb: 'var(--fg-rgb)', Icon: MinusCircle },
 }
 
 export function StatusBadge({ status }: { status: LabelStatus }) {
@@ -236,7 +236,7 @@ export default function ResultsLabelPage() {
 
 function Page({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ maxWidth: '1100px', margin: '0 auto', padding: '32px 24px 64px' }}>
+    <div style={{ maxWidth: '1440px', margin: '0 auto', padding: '32px 24px 64px' }}>
       {children}
       <style>{'@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }'}</style>
     </div>

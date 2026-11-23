@@ -6,6 +6,8 @@ import {
   CheckCircle, FileCode2, Lock, Gauge, Activity, Github, Container, LineChart, Send, Chrome, Bot, Cog,
 } from 'lucide-react'
 import './landing.css'
+import { useTheme } from '../theme'
+import ThemeToggle from '../components/ThemeToggle'
 
 // ---------------------------------------------------------------------------
 // Traffic waveform — a field of sine lines that reads as live load on a system
@@ -14,6 +16,7 @@ import './landing.css'
 function TrafficCanvas() {
   const ref = useRef<HTMLCanvasElement>(null)
   const reduce = useReducedMotion()
+  const { theme } = useTheme()
 
   useEffect(() => {
     const canvas = ref.current
@@ -23,6 +26,10 @@ function TrafficCanvas() {
 
     const LINES = 24
     let w = 0, h = 0, raf = 0, t = 0, visible = true
+    // Canvas cannot read CSS variables: take the theme's ink and accent now (the effect reruns on a theme change)
+    const css = getComputedStyle(document.documentElement)
+    const fg = css.getPropertyValue('--fg-rgb').trim() || '255, 255, 255'
+    const accent = css.getPropertyValue('--accent-rgb').trim() || '222, 83, 83'
 
     const resize = () => {
       const dpr = Math.min(window.devicePixelRatio || 1, 2)
@@ -50,8 +57,8 @@ function TrafficCanvas() {
           if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y)
         }
         ctx.strokeStyle = highlight
-          ? `rgba(255, 255, 255, ${0.10 + 0.08 * Math.sin(t + i)})`
-          : `rgba(222, 83, 83, ${0.06 + 0.22 * Math.sin(Math.PI * k)})`
+          ? `rgba(${fg}, ${0.10 + 0.08 * Math.sin(t + i)})`
+          : `rgba(${accent}, ${0.06 + 0.22 * Math.sin(Math.PI * k)})`
         ctx.lineWidth = highlight ? 1.2 : 1
         ctx.stroke()
       }
@@ -73,7 +80,7 @@ function TrafficCanvas() {
       window.removeEventListener('resize', resize)
       io.disconnect()
     }
-  }, [reduce])
+  }, [reduce, theme])
 
   return <canvas ref={ref} className="lp-hero-canvas" aria-hidden="true" />
 }
@@ -134,7 +141,7 @@ function PipelineDemo() {
                 {r.path}
                 {r.tokenInPath && (stage >= 2
                   ? <span className="lp-token">{'${cartId}'}</span>
-                  : <span style={{ color: flagged ? '#fff' : undefined }}>{r.token}</span>)}
+                  : <span style={{ color: flagged ? 'var(--text-primary)' : undefined }}>{r.token}</span>)}
               </span>
               {r.token && !r.tokenInPath && flagged && (
                 <motion.span className="lp-token" initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}>
@@ -349,6 +356,7 @@ export default function LandingPage() {
             <button onClick={() => scrollTo('how-it-works')}>How it works</button>
             <button onClick={() => scrollTo('faqs')}>FAQs</button>
           </div>
+          <ThemeToggle />
           <button className="lp-btn lp-btn-primary lp-btn-sm" onClick={launch}>
             Launch app <ArrowUpRight size={15} />
           </button>

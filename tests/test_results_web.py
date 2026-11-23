@@ -5,6 +5,8 @@ app (record → generate → run in JMeter → analyse that session's results).
 """
 
 import json
+from pathlib import Path
+import re
 import secrets
 import time
 
@@ -155,6 +157,145 @@ def test_ai_endpoints_without_provider(client, tmp_path, monkeypatch):
     assert obs["source"] == "rules" and "No Anthropic API key" in obs["note"]      # falls back, says why
     ask = client.post(f"/api/results/runs/{run_id}/ask", json={"question": "How many samples?"})
     assert ask.status_code == 400 and "AI provider" in ask.json()["detail"]
+
+
+def test_server_screenshots_in_the_app(client, tmp_path, monkeypatch):
+    from projectstack.llm import registry
+    from projectstack.llm.base import LLMConfigError
+    from tests.test_results_screenshots import FakeVision, png, shot_entry
+    path = write_csv(tmp_path / "s.jtl", [sample(START_MS + i * 1000, 100, "GET /a", "T 1-1", 1) for i in range(30)])
+    with path.open("rb") as f:
+        run_id = _wait(client, client.post("/api/results/analyze", files={"file": ("s.jtl", f)}).json()["id"])["run_id"]
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(registry, "ollama_vision_models", lambda settings: [])
+    base = f"/api/results/runs/{run_id}/screenshots"
+
+    state = client.get(base).json()
+    assert state["items"] == [] and state["analysis"] is None and state["providers"]["choices"] == []
+    up = client.post(base, files=[("files", ("cpu.png", png(), "image/png")),
+                                  ("files", ("notes.txt", b"not a picture", "text/plain"))]).json()
+    assert [i["name"] for i in up["items"]] == ["cpu.png"] and "not a PNG" in up["errors"][0]   # the good one is kept
+    assert client.post(base, files=[("files", ("x.txt", b"no", "text/plain"))]).status_code == 400
+    sid = up["items"][0]["id"]
+    img = client.get(f"{base}/{sid}/image")
+    assert img.content == png() and img.headers["content-type"] == "image/png"
+    assert img.headers["x-content-type-options"] == "nosniff"
+    assert client.patch(f"{base}/{sid}", json={"caption": "CPU – app"}).json()["items"][0]["caption"] == "CPU – app"
+
+    def no_key(task, settings, override=None):
+        raise LLMConfigError("No Gemini API key")
+    monkeypatch.setattr(registry, "provider_for_task", no_key)
+    refused = client.post(f"{base}/analysis", json={})
+    assert refused.status_code == 400 and "No Gemini API key" in refused.json()["detail"]
+
+    fake = FakeVision({"cpu.png": shot_entry("CPU, app", time_axis="09:00 to 09:05", test_on_chart="09:00 to 09:01",
+                                             observations=["CPU stayed flat."])},
+                      summary={"observations": ["The app server had headroom."], "caveats": []})
+    monkeypatch.setattr(registry, "provider_for_task", lambda task, settings, override=None: fake)
+    job = client.post(f"{base}/analysis", json={"provider": "fake", "time_zone": "Asia/Kolkata"}).json()
+    assert job["status"] in ("running", "done")                                   # read in the background
+    deadline = time.monotonic() + 20
+    while job["status"] == "running" and time.monotonic() < deadline:
+        time.sleep(0.1)
+        job = client.get(f"{base}/analysis/{job['id']}").json()
+    assert job["status"] == "done", job
+    read = job["result"]
+    assert read["content"]["observations"] == ["The app server had headroom."] and read["stale"] is False
+    assert job["done"] == job["total"] == 1
+    assert '"local_time_zone":"Asia/Kolkata (UTC+05:30)"' in fake.batches()[0]["prompt"]
+    assert client.get(f"{base}/analysis/nope").status_code == 404
+    assert client.get(base).json()["analysis"]["content"]["screenshots"][0]["title"] == "CPU, app"
+    report = client.get(f"/api/results/runs/{run_id}/report?audience=tech").text
+    assert "Server metrics from screenshots" in report and "The app server had headroom." in report
+    assert 'src="data:image/png;base64,' in report
+
+    # Downloads: one self-contained file each, named after the scenario
+    for path, name in ((f"report?audience=tech&format=html&download=true", "technical-report.html"),
+                       (f"report?audience=exec&format=html&download=true", "executive-summary.html"),
+                       (f"report?audience=tech&format=md&download=true", "technical-report.md"),
+                       (f"labels-report?format=html&download=true", "requests-and-transactions.html")):
+        got = client.get(f"/api/results/runs/{run_id}/{path}")
+        assert got.status_code == 200, (path, got.text[:200])
+        assert f'filename="{run_id}_{name}"' in got.headers["content-disposition"] or \
+            f'_{run_id}_{name}"' in got.headers["content-disposition"], got.headers["content-disposition"]
+        if name.endswith(".html"):
+            assert got.text.lstrip().lower().startswith("<!doctype html>")
+            assert not re.search(r'(src|href)="https?://', got.text)                 # nothing loaded from elsewhere
+
+    assert client.delete(f"{base}/{sid}").json()["items"] == []
+    assert client.get(f"{base}/{sid}/image").status_code == 404
+    assert client.delete(f"{base}/{sid}").status_code == 404
+
+
+def test_word_report_and_company_template(client, tmp_path):
+    import io
+    docx = pytest.importorskip("docx")
+    path = write_csv(tmp_path / "w.jtl", [sample(START_MS + i * 1000, 100, "GET /a", "T 1-1", 1) for i in range(30)])
+    with path.open("rb") as f:
+        run_id = _wait(client, client.post("/api/results/analyze", files={"file": ("w.jtl", f)},
+                                           data={"scenario": "Word demo"}).json()["id"])["run_id"]
+    state = client.get("/api/results/report-template").json()
+    assert state["template"] is None and set(state["doc"]) == {"available", "path", "install"}
+    from projectstack.results import office
+    real_find = office.find_soffice
+    office.find_soffice = lambda settings=None: None                  # no LibreOffice: .doc says why, .docx works
+    try:
+        no_doc = client.get(f"/api/results/runs/{run_id}/report?format=doc&download=true")
+        assert no_doc.status_code == 503 and "libreoffice-writer-nogui" in no_doc.json()["detail"]
+        assert client.get("/api/results/report-template").json()["doc"]["available"] is False
+    finally:
+        office.find_soffice = real_find
+    starter = client.get("/api/results/report-template/starter")
+    assert starter.status_code == 200 and starter.content[:2] == b"PK"
+
+    built_in = client.get(f"/api/results/runs/{run_id}/report?format=docx&download=true")
+    assert built_in.status_code == 200, built_in.text[:300]
+    assert built_in.headers["content-type"].startswith("application/vnd.openxmlformats-officedocument.wordprocessingml")
+    assert f'filename="Word-demo_{run_id}_performance-report.docx"' in built_in.headers["content-disposition"]
+    text = "\n".join(p.text for p in docx.Document(io.BytesIO(built_in.content)).paragraphs)
+    assert "4. Performance Highlights & Observations" in text and "Upload your company's Word template" in text
+
+    up = client.post("/api/results/report-template", files={"file": ("ACME.docx", starter.content)}).json()
+    assert up["template"]["name"] == "ACME.docx" and up["template"]["marker"] is True
+    branded = client.get(f"/api/results/runs/{run_id}/report?format=docx&download=true")
+    text = "\n".join(p.text for p in docx.Document(io.BytesIO(branded.content)).paragraphs)
+    assert "[[REPORT]]" not in text and "{{scenario}}" not in text and "Word demo" in text
+    assert "Upload your company's Word template" not in text                          # the template's cover instead
+    bad = client.post("/api/results/report-template", files={"file": ("x.docx", b"not a zip")})
+    assert bad.status_code == 400 and "not a Word document" in bad.json()["detail"]
+    assert client.delete("/api/results/report-template").json()["template"] is None
+
+
+def test_create_report_from_a_blueprint(client, ch_db, tmp_path):
+    import io
+    docx = pytest.importorskip("docx")
+    from projectstack.config import load_settings
+    from projectstack.results import blueprint as bp
+    from projectstack.results.db import ClickHouseConfig, ResultsDB
+    from projectstack.results.report import locate
+    from tests.test_results_blueprint import make_blueprint
+    rows = sorted([sample(START_MS + i * 500, 100 + i % 7, "GET /search", "US - Search 1-2", 2) for i in range(400)]
+                  + [sample(START_MS + 250 + i * 500, 80, "POST /checkout", "US - Checkout 1-1", 1) for i in range(400)],
+                  key=lambda r: r["timeStamp"])
+    path = write_csv(tmp_path / "bp.jtl", rows)
+    with path.open("rb") as f:
+        run_id = _wait(client, client.post("/api/results/analyze", files={"file": ("bp.jtl", f)},
+                                           data={"scenario": "Blueprint demo"}).json()["id"])["run_id"]
+    settings = load_settings()
+    db = ResultsDB(ClickHouseConfig.from_settings({**settings, "clickhouse_database": ch_db}))
+    folder, doc = locate(run_id, Path(settings["runs_dir"]))
+    assert bp.thread_groups(db, run_id) == {"Search": 2, "Checkout": 1}
+    data, _ = bp.build(make_blueprint(), [bp.RunInput(folder, doc, "Load Test - US region", "US")],
+                       settings=settings, db=db)
+    d = docx.Document(io.BytesIO(data))
+    assert len(d.inline_shapes) == 4 + 0                         # the four graphs redrawn; no screenshots attached
+    agg = d.tables[-1]
+    assert agg.rows[0].cells[0].text == "Label" and agg.rows[0].cells[12].text == "KB/s out"
+    assert {r.cells[0].text for r in agg.rows[1:]} == {"GET /search", "POST /checkout"}
+    assert agg.rows[1].cells[1].text == "400"
+    workload = d.tables[1]
+    assert [c.text for c in workload.rows[2].cells] == ["J01", "Search", "50%", "2"]   # users per journey from the run
+    assert workload.rows[1].cells[3].text == "3"
 
 
 def test_status_when_database_is_down(client, monkeypatch):

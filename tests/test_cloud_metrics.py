@@ -372,6 +372,9 @@ def test_cloud_endpoints_and_auto_fetch(env, tmp_path, monkeypatch):
     assert res.status_code == 200, res.text
     got = client.get(f"/api/results/runs/{run_id}/server-metrics").json()
     assert got["available"] and len(got["series"]) == 2 and got["findings"][0]["evidence"]["pattern"] == "hot"
+    rel = got["relation"]                                  # the series set against the load test
+    assert rel["source"] == "cloud" and len(rel["rows"]) == 2 and rel["observations"]
+    assert {r["name"].split(" · ")[1] for r in rel["rows"]} == {"orders-db"}
 
     # A new upload of the same scenario fetches the saved resources by itself
     with open(env["jtl"], "rb") as f:

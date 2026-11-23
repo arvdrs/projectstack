@@ -3,6 +3,7 @@ The provider interface every LLM integration implements, shared by correlation,
 reports and the `ask` agent.
 
   complete(system, prompt)                     one prompt, one answer
+  complete(system, prompt, images=[...])       the same, with pictures for a vision model to read
   complete_with_tools(system, messages, tools) one turn of a tool-using conversation
 
 Conversation history is kept in each provider's own message format (built with
@@ -37,6 +38,24 @@ class Completion:
     stop_reason: str = ""
     input_tokens: int | None = None
     output_tokens: int | None = None
+
+
+@dataclass
+class Image:
+    """A picture for a vision-capable model: the file's bytes and media type."""
+    data: bytes
+    media_type: str                     # image/png, image/jpeg, image/webp or image/gif
+    name: str = ""
+
+    @property
+    def b64(self) -> str:
+        import base64
+        return base64.b64encode(self.data).decode("ascii")
+
+
+def image_label(i: int, image: Image) -> str:
+    """The text placed before the i-th picture (1-based), so the prompt can refer to "Image 2"."""
+    return f"Image {i}" + (f" ({image.name})" if image.name else "")
 
 
 @dataclass
@@ -77,8 +96,14 @@ class Provider(ABC):
 
     @abstractmethod
     def complete(self, system: str, prompt: str, *, max_tokens: int = 8192,
-                 json_schema: dict | None = None, effort: str | None = None) -> Completion:
-        """Answer one prompt. With json_schema, the answer is JSON (enforced where the provider can)."""
+                 json_schema: dict | None = None, effort: str | None = None,
+                 images: list[Image] | None = None) -> Completion:
+        """Answer one prompt. With json_schema, the answer is JSON (enforced where the provider can).
+        With images, the pictures go before the prompt, each after an "Image N" label; the model
+        must be able to read images (LLMConfigError where the provider can tell it cannot)."""
+
+    def warm_up(self) -> None:
+        """Before a long job of several calls: find out which models answer (no-op unless a provider fails over)."""
 
     def complete_with_tools(self, system: str, messages: list[Any], tools: list[ToolSpec], *,
                             max_tokens: int = 8192, effort: str | None = None) -> ToolTurn:

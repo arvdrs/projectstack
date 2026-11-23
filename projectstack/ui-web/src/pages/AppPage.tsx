@@ -35,6 +35,9 @@ import {
 // Constants
 // ---------------------------------------------------------------------------
 
+/** A colour (hex or CSS variable) at `pct`% over transparent, for badge washes and borders */
+const tint = (color: string, pct: number) => `color-mix(in srgb, ${color} ${pct}%, transparent)`
+
 const STEPS = [
   { label: 'Upload', icon: Upload },
   { label: 'Correlate Values', icon: Zap },
@@ -69,12 +72,12 @@ function Btn({
   }
   const styles: Record<string, React.CSSProperties> = {
     primary: { ...base, background: 'var(--accent-gradient)', color: '#fff', boxShadow: '0 6px 20px -8px rgba(var(--accent-rgb),0.7)' },
-    ghost: { ...base, background: 'rgba(255,255,255,0.05)', color: 'var(--text-primary)', border: '1px solid var(--border-strong)', backdropFilter: 'blur(10px)' },
+    ghost: { ...base, background: 'rgba(var(--fg-rgb),0.05)', color: 'var(--text-primary)', border: '1px solid var(--border-strong)', backdropFilter: 'blur(10px)' },
     danger: { ...base, background: 'rgba(var(--danger-rgb),0.1)', color: 'var(--danger)', border: '1px solid rgba(var(--danger-rgb),0.3)' },
   }
   return (
     <button style={styles[variant]} onClick={onClick} disabled={disabled}
-      onMouseEnter={e => { if (!disabled) { const el = e.currentTarget; el.style.transform = 'translateY(-1px)'; if (variant === 'primary') el.style.boxShadow = '0 10px 28px -8px rgba(var(--accent-rgb),0.85)'; else el.style.background = 'rgba(255,255,255,0.1)' } }}
+      onMouseEnter={e => { if (!disabled) { const el = e.currentTarget; el.style.transform = 'translateY(-1px)'; if (variant === 'primary') el.style.boxShadow = '0 10px 28px -8px rgba(var(--accent-rgb),0.85)'; else el.style.background = 'rgba(var(--fg-rgb),0.1)' } }}
       onMouseLeave={e => { const el = e.currentTarget; el.style.transform = 'translateY(0)'; el.style.boxShadow = styles[variant].boxShadow as string ?? ''; el.style.background = styles[variant].background as string }}
     >
       {children}
@@ -84,7 +87,7 @@ function Btn({
 
 function Card({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
   return (
-    <div style={{ background: 'var(--glass), var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: '20px', padding: '28px', boxShadow: '0 20px 40px -24px rgba(0,0,0,0.6)', ...style }}>
+    <div style={{ background: 'var(--glass), var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: '20px', padding: '28px', boxShadow: '0 20px 40px -24px rgba(var(--shadow-rgb),0.6)', ...style }}>
       {children}
     </div>
   )
@@ -144,10 +147,10 @@ function Input({ value, onChange, type = 'text', placeholder, min, disabled }: {
 }
 
 function MethodBadge({ method }: { method: string }) {
-  const colors: Record<string, string> = { GET: '#58a6ff', POST: '#3ccf7a', PUT: '#d29922', DELETE: '#f85149', PATCH: '#d2a8ff' }
-  const c = colors[method.toUpperCase()] || '#8b949e'
+  const colors: Record<string, string> = { GET: 'var(--c-blue)', POST: 'var(--c-green)', PUT: 'var(--c-yellow)', DELETE: 'var(--c-red)', PATCH: 'var(--c-purple)' }
+  const c = colors[method.toUpperCase()] || 'var(--text-muted)'
   return (
-    <span style={{ fontSize: '11px', fontWeight: 700, fontFamily: 'monospace', color: c, background: `${c}18`, borderRadius: '4px', padding: '2px 6px' }}>
+    <span style={{ fontSize: '11px', fontWeight: 700, fontFamily: 'monospace', color: c, background: tint(c, 9), borderRadius: '4px', padding: '2px 6px' }}>
       {method}
     </span>
   )
@@ -455,7 +458,7 @@ function RequestDetailPanel({ sessionId, requestIndex, onClose, correlatedValues
               {usedHighlights.length > 0 && (
                 <div style={{ marginBottom: '14px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                   {usedHighlights.map(dv => (
-                    <span key={dv.var_name} style={{ fontSize: '11px', padding: '2px 9px', borderRadius: '10px', background: 'rgba(var(--info-rgb),0.12)', border: '1px solid rgba(var(--info-rgb),0.3)', color: '#58a6ff', fontFamily: 'monospace' }}>
+                    <span key={dv.var_name} style={{ fontSize: '11px', padding: '2px 9px', borderRadius: '10px', background: 'rgba(var(--info-rgb),0.12)', border: '1px solid rgba(var(--info-rgb),0.3)', color: 'var(--c-blue)', fontFamily: 'monospace' }}>
                       ${'{' + dv.var_name + '}'} ← used
                     </span>
                   ))}
@@ -533,7 +536,7 @@ function RequestDetailPanel({ sessionId, requestIndex, onClose, correlatedValues
 // Transactions — group requests into JMeter Transaction Controllers
 // ---------------------------------------------------------------------------
 
-const TXN_COLORS = ['#58a6ff', '#3ccf7a', '#d29922', '#d2a8ff', '#39c5cf', '#f0883e']
+const TXN_COLORS = ['var(--c-blue)', 'var(--c-green)', 'var(--c-yellow)', 'var(--c-purple)', 'var(--c-cyan)', 'var(--c-orange)']
 
 /** Name as the generator writes it after TC_nn_ (mirrors clean_transaction_name on the server). */
 function cleanTxnName(name: string): string {
@@ -933,7 +936,7 @@ function RecorderPanel({ onRecorded }: { onRecorded: (res: ProxyStopResult) => v
               const isCurrent = t.name === current && i === txns.map(x => x.name).lastIndexOf(current)
               const color = t.name ? TXN_COLORS[i % TXN_COLORS.length] : 'var(--text-muted)'
               return (
-                <div key={`${i}-${t.name}`} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 12px', borderRadius: '10px', border: `1px solid ${isCurrent ? color : 'var(--border)'}`, background: isCurrent ? 'rgba(255,255,255,0.03)' : 'transparent' }}>
+                <div key={`${i}-${t.name}`} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 12px', borderRadius: '10px', border: `1px solid ${isCurrent ? color : 'var(--border)'}`, background: isCurrent ? 'rgba(var(--fg-rgb),0.03)' : 'transparent' }}>
                   <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: color, flexShrink: 0 }} />
                   <span style={{ flex: 1, fontSize: '13px', fontWeight: t.name ? 600 : 400, color: t.name ? 'var(--text-primary)' : 'var(--text-muted)' }}>
                     {t.name || 'Before the first transaction'}
@@ -1186,7 +1189,7 @@ function StepUpload() {
         {/* HAR 1 */}
         <div>
           <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '7px' }}>
-            <span style={{ width: '20px', height: '20px', borderRadius: '50%', background: preview ? 'var(--success)' : 'var(--bg-elevated)', border: preview ? 'none' : '2px solid var(--border)', color: preview ? '#0a0c0f' : 'var(--text-muted)', fontSize: '11px', fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>1</span>
+            <span style={{ width: '20px', height: '20px', borderRadius: '50%', background: preview ? 'var(--success)' : 'var(--bg-elevated)', border: preview ? 'none' : '2px solid var(--border)', color: preview ? 'var(--bg-base)' : 'var(--text-muted)', fontSize: '11px', fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>1</span>
             First Recording <span style={{ fontSize: '11px', color: 'var(--danger)', fontWeight: 500 }}>required</span>
           </div>
           {preview ? (
@@ -1232,7 +1235,7 @@ function StepUpload() {
         {/* HAR 2 */}
         <div>
           <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '7px' }}>
-            <span style={{ width: '20px', height: '20px', borderRadius: '50%', background: secondPreview ? 'var(--success)' : 'var(--bg-elevated)', border: secondPreview ? 'none' : '2px solid var(--border)', color: secondPreview ? '#0a0c0f' : 'var(--text-muted)', fontSize: '11px', fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>2</span>
+            <span style={{ width: '20px', height: '20px', borderRadius: '50%', background: secondPreview ? 'var(--success)' : 'var(--bg-elevated)', border: secondPreview ? 'none' : '2px solid var(--border)', color: secondPreview ? 'var(--bg-base)' : 'var(--text-muted)', fontSize: '11px', fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>2</span>
             Second Recording <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 400 }}>optional · detects dynamic values</span>
           </div>
           {secondPreview ? (
@@ -1284,7 +1287,7 @@ function StepUpload() {
       {source === 'convert' && (
         <Card style={{ marginBottom: '20px' }}>
           <div style={{ display: 'flex', gap: '14px', alignItems: 'flex-start', marginBottom: '18px' }}>
-            <FileDown size={20} style={{ color: '#d29922', flexShrink: 0, marginTop: '2px' }} />
+            <FileDown size={20} style={{ color: 'var(--c-yellow)', flexShrink: 0, marginTop: '2px' }} />
             <div>
               <div style={{ fontSize: '16px', fontWeight: 600 }}>Quick Convert</div>
               <div style={{ fontSize: '13px', color: 'var(--text-muted)', marginTop: '3px', lineHeight: 1.6 }}>
@@ -1311,12 +1314,12 @@ function StepUpload() {
               onDragOver={e => { e.preventDefault(); setDraggingRaw(true) }}
               onDragLeave={() => setDraggingRaw(false)}
               onDrop={e => { e.preventDefault(); setDraggingRaw(false); const f = e.dataTransfer.files[0]; if (f) handleRawConvert(f) }}
-              style={{ border: `2px dashed ${draggingRaw ? '#d29922' : '#7a611555'}`, borderRadius: '20px', padding: '48px 20px', textAlign: 'center', cursor: 'pointer', transition: 'all 0.2s', background: draggingRaw ? 'rgba(var(--warning-rgb),0.06)' : 'rgba(var(--warning-rgb),0.02)' }}
+              style={{ border: `2px dashed ${draggingRaw ? 'var(--c-yellow)' : 'rgba(var(--c-yellow-rgb),0.33)'}`, borderRadius: '20px', padding: '48px 20px', textAlign: 'center', cursor: 'pointer', transition: 'all 0.2s', background: draggingRaw ? 'rgba(var(--warning-rgb),0.06)' : 'rgba(var(--warning-rgb),0.02)' }}
             >
               <input ref={inputRawRef} type="file" accept=".har" style={{ display: 'none' }} onChange={e => { if (e.target.files?.[0]) handleRawConvert(e.target.files[0]) }} />
               {loadingRaw ? (
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
-                  <Loader2 size={28} style={{ color: '#d29922', animation: 'spin 1s linear infinite' }} />
+                  <Loader2 size={28} style={{ color: 'var(--c-yellow)', animation: 'spin 1s linear infinite' }} />
                   <span style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>Converting…</span>
                 </div>
               ) : (
@@ -1402,11 +1405,11 @@ function StepUpload() {
                   <span style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: '3px' }}>Included</span>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                  <span style={{ fontSize: '22px', fontWeight: 700, color: filteredCount > 0 ? '#d29922' : 'var(--text-muted)', lineHeight: 1 }}>{filteredCount}</span>
+                  <span style={{ fontSize: '22px', fontWeight: 700, color: filteredCount > 0 ? 'var(--c-yellow)' : 'var(--text-muted)', lineHeight: 1 }}>{filteredCount}</span>
                   <span style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: '3px' }}>Filtered</span>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                  <span style={{ fontSize: '22px', fontWeight: 700, color: '#58a6ff', lineHeight: 1 }}>{correlatedValues.length}</span>
+                  <span style={{ fontSize: '22px', fontWeight: 700, color: 'var(--c-blue)', lineHeight: 1 }}>{correlatedValues.length}</span>
                   <span style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: '3px' }}>Correlations</span>
                 </div>
                 {selectedDomains.length > 0 && (
@@ -1504,7 +1507,7 @@ function StepUpload() {
                             <td style={{ padding: '6px 10px', color: r.status_code >= 400 ? 'var(--danger)' : 'var(--success)', fontSize: '12px' }}>{r.status_code}</td>
                             <td style={{ padding: '4px 8px' }}>
                               {getCorrelationCount(r.index) > 0 && (
-                                <span style={{ fontSize: '11px', fontWeight: 700, padding: '1px 6px', borderRadius: '10px', background: 'rgba(var(--info-rgb),0.12)', border: '1px solid rgba(var(--info-rgb),0.3)', color: '#58a6ff' }}>
+                                <span style={{ fontSize: '11px', fontWeight: 700, padding: '1px 6px', borderRadius: '10px', background: 'rgba(var(--info-rgb),0.12)', border: '1px solid rgba(var(--info-rgb),0.3)', color: 'var(--c-blue)' }}>
                                   {getCorrelationCount(r.index)}
                                 </span>
                               )}
@@ -1516,7 +1519,7 @@ function StepUpload() {
                                 const c = TXN_COLORS[t.n % TXN_COLORS.length]
                                 return (
                                   <button onClick={() => setUploadTab('transactions')} title="Edit transactions"
-                                    style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '10px', border: `1px solid ${c}55`, background: `${c}18`, color: c, cursor: 'pointer', maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '10px', border: `1px solid ${tint(c, 33)}`, background: tint(c, 9), color: c, cursor: 'pointer', maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                     {t.name}
                                   </button>
                                 )
@@ -1707,7 +1710,7 @@ function StepUpload() {
                       {/* Responses the browser did not save — correlation is blind to them */}
                       {(harAnalysis.missing_response_bodies?.length ?? 0) > 0 && (
                         <div style={{ padding: '12px 16px', background: 'rgba(var(--warning-rgb),0.08)', borderRadius: '8px', border: '1px solid rgba(var(--warning-rgb),0.3)', fontSize: '13px', color: 'var(--text-secondary)', display: 'flex', gap: '8px' }}>
-                          <AlertTriangle size={15} style={{ color: '#d29922', flexShrink: 0, marginTop: '2px' }} />
+                          <AlertTriangle size={15} style={{ color: 'var(--c-yellow)', flexShrink: 0, marginTop: '2px' }} />
                           <span>
                             {harAnalysis.missing_response_bodies!.length} response{harAnalysis.missing_response_bodies!.length !== 1 ? 's have' : ' has'} no saved body
                             (#{harAnalysis.missing_response_bodies!.slice(0, 6).map(i => i + 1).join(', #')}{harAnalysis.missing_response_bodies!.length > 6 ? ', …' : ''}).
@@ -1768,7 +1771,7 @@ function StepUpload() {
 
                       {/* Duplicates */}
                       {harAnalysis.duplicates.length > 0 && (
-                        <div style={{ padding: '10px 14px', background: 'rgba(var(--warning-rgb),0.06)', borderRadius: '8px', border: '1px solid rgba(var(--warning-rgb),0.2)', fontSize: '13px', color: '#d29922' }}>
+                        <div style={{ padding: '10px 14px', background: 'rgba(var(--warning-rgb),0.06)', borderRadius: '8px', border: '1px solid rgba(var(--warning-rgb),0.2)', fontSize: '13px', color: 'var(--c-yellow)' }}>
                           <strong>{harAnalysis.duplicates.length}</strong> duplicate request(s) found.
                           Indices: {harAnalysis.duplicates.slice(0, 5).map(d => `#${d.index + 1}`).join(', ')}{harAnalysis.duplicates.length > 5 ? '…' : ''}
                         </div>
@@ -1806,7 +1809,7 @@ function StepUpload() {
 // ---------------------------------------------------------------------------
 
 const PROVIDER_LABELS: Record<string, { label: string; subtitle: string; tier: string }> = {
-  groq:   { label: 'Groq',   subtitle: 'Llama 3.3 70B', tier: 'free' },
+  groq:   { label: 'Groq',   subtitle: 'GPT-OSS 120B', tier: 'free' },
   gemini: { label: 'Gemini', subtitle: 'Flash 2.0',      tier: 'free' },
   ollama: { label: 'Ollama', subtitle: 'Local model',    tier: 'free' },
   claude: { label: 'Claude', subtitle: 'Opus 5.5',       tier: 'paid' },
@@ -1814,13 +1817,13 @@ const PROVIDER_LABELS: Record<string, { label: string; subtitle: string; tier: s
 }
 
 const PASS_META: Record<string, { label: string; color: string }> = {
-  pass1:    { label: 'JWT / Bearer',       color: '#d29922' },
-  pass2:    { label: 'JSON Response',      color: '#58a6ff' },
-  pass_url: { label: 'URL Path IDs',       color: '#39c5cf' },
-  pass3:    { label: 'Headers / Cookies',  color: '#f0883e' },
-  pass4:    { label: 'Plain Text',         color: '#8b949e' },
-  pass6:    { label: 'AI Detection',       color: '#d2a8ff' },
-  manual:   { label: 'Manual',             color: '#3ccf7a' },
+  pass1:    { label: 'JWT / Bearer',       color: 'var(--c-yellow)' },
+  pass2:    { label: 'JSON Response',      color: 'var(--c-blue)' },
+  pass_url: { label: 'URL Path IDs',       color: 'var(--c-cyan)' },
+  pass3:    { label: 'Headers / Cookies',  color: 'var(--c-orange)' },
+  pass4:    { label: 'Plain Text',         color: 'var(--text-muted)' },
+  pass6:    { label: 'AI Detection',       color: 'var(--c-purple)' },
+  manual:   { label: 'Manual',             color: 'var(--c-green)' },
 }
 
 function getPassGroup(pass: string): string {
@@ -1873,7 +1876,7 @@ function CorrelationConfidence({ a }: { a: CorrelationAssessment }) {
         </div>
         <div style={{ flex: 1, minWidth: '160px' }}>
           <div role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={a.score} aria-label="Auto-correlation confidence"
-            style={{ height: '6px', borderRadius: '3px', background: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+            style={{ height: '6px', borderRadius: '3px', background: 'rgba(var(--fg-rgb),0.08)', overflow: 'hidden' }}>
             <div style={{ width: `${a.score}%`, height: '100%', background: `var(--${tone})`, borderRadius: '3px', transition: 'width 0.4s ease' }} />
           </div>
           <div style={{ fontSize: '13px', color: 'var(--text-primary)', marginTop: '8px' }}>{a.headline}</div>
@@ -1903,11 +1906,11 @@ function UsedInBadge({ indices, requests }: { indices: number[]; requests: Reque
       onMouseEnter={() => setShow(true)}
       onMouseLeave={() => setShow(false)}
     >
-      <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px', background: 'rgba(var(--info-rgb),0.12)', border: '1px solid rgba(var(--info-rgb),0.3)', color: '#58a6ff', cursor: 'default' }}>
+      <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px', background: 'rgba(var(--info-rgb),0.12)', border: '1px solid rgba(var(--info-rgb),0.3)', color: 'var(--c-blue)', cursor: 'default' }}>
         {indices.length}
       </span>
       {show && (
-        <div style={{ position: 'absolute', bottom: '100%', left: '50%', transform: 'translateX(-50%)', marginBottom: '6px', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: '8px', padding: '8px 10px', zIndex: 100, minWidth: '240px', maxWidth: '340px', boxShadow: '0 4px 16px rgba(0,0,0,0.4)' }}>
+        <div style={{ position: 'absolute', bottom: '100%', left: '50%', transform: 'translateX(-50%)', marginBottom: '6px', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: '8px', padding: '8px 10px', zIndex: 100, minWidth: '240px', maxWidth: '340px', boxShadow: '0 4px 16px rgba(var(--shadow-rgb),0.4)' }}>
           {indices.slice(0, 8).map(idx => {
             const req = requests.find(r => r.index === idx)
             let path = `#${idx + 1}`
@@ -1961,14 +1964,14 @@ function CorrelationPassSection({ groupKey, rows, requests, onToggle, onRename, 
   onDelete: (id: string) => void
 }) {
   const [open, setOpen] = useState(true)
-  const meta = PASS_META[groupKey] ?? { label: groupKey, color: '#8b949e' }
+  const meta = PASS_META[groupKey] ?? { label: groupKey, color: 'var(--text-muted)' }
   const enabledCount = rows.filter(r => r.enabled).length
 
   return (
     <div style={{ marginBottom: '12px', border: '1px solid var(--border)', borderRadius: '10px', overflow: 'hidden' }}>
       <button onClick={() => setOpen(o => !o)}
         style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 16px', background: 'var(--bg-elevated)', border: 'none', cursor: 'pointer', borderLeft: `3px solid ${meta.color}`, textAlign: 'left' }}>
-        <span style={{ fontSize: '12px', fontWeight: 700, color: meta.color, background: `${meta.color}1a`, padding: '2px 9px', borderRadius: '4px' }}>
+        <span style={{ fontSize: '12px', fontWeight: 700, color: meta.color, background: tint(meta.color, 10), padding: '2px 9px', borderRadius: '4px' }}>
           {meta.label}
         </span>
         <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{enabledCount}/{rows.length} enabled</span>
@@ -2285,8 +2288,8 @@ function HighlightedValue({ text, rows, testVars = [] }: { text: string; rows: C
         const isP = s.kind === 'p_var'
         return (
           <span key={i} style={{
-            color: isP ? '#a78bfa' : '#e36209',
-            background: isP ? 'rgba(139,92,246,0.13)' : 'rgba(227,98,9,0.13)',
+            color: isP ? 'var(--c-violet)' : 'var(--c-amber)',
+            background: isP ? 'rgba(var(--c-violet-rgb),0.13)' : 'rgba(var(--c-amber-rgb),0.13)',
             borderRadius: '3px', padding: '0 3px', fontWeight: 600,
           }}>{s.t}</span>
         )
@@ -2385,10 +2388,10 @@ function ReplayPanel({ sessionId, requests, busy, beforeReplay, onApplied }: {
               {' '}{final.verified.length} verified dynamic · {final.static.length} unchanged
             </span>
             {result.iterations.some(it => it.rolled_back) && (
-              <span style={{ fontSize: '11px', color: '#d29922' }}>Last changes made things worse and were rolled back</span>
+              <span style={{ fontSize: '11px', color: 'var(--c-yellow)' }}>Last changes made things worse and were rolled back</span>
             )}
             {result.unverified_changes && (
-              <span style={{ fontSize: '11px', color: '#d29922' }}>Fixes from the last pass are not verified yet — replay again</span>
+              <span style={{ fontSize: '11px', color: 'var(--c-yellow)' }}>Fixes from the last pass are not verified yet — replay again</span>
             )}
           </div>
 
@@ -2406,7 +2409,7 @@ function ReplayPanel({ sessionId, requests, busy, beforeReplay, onApplied }: {
               ))}
               {repaired.map(r => (
                 <div key={`r-${r.var_name}`} style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'flex', gap: '8px', alignItems: 'center' }}>
-                  <Wrench size={12} style={{ color: '#d29922' }} />
+                  <Wrench size={12} style={{ color: 'var(--c-yellow)' }} />
                   <span style={{ fontFamily: 'monospace', color: 'var(--accent)' }}>${'{'}{r.var_name}{'}'}</span>
                   <span style={{ color: 'var(--text-muted)' }}>extractor repaired: {EXTRACTOR_LABEL[r.from] ?? r.from} → {EXTRACTOR_LABEL[r.to] ?? r.to}</span>
                 </div>
@@ -2433,7 +2436,7 @@ function ReplayPanel({ sessionId, requests, busy, beforeReplay, onApplied }: {
                       <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>recorded {r.recorded_status} · replay {r.replay_status ?? '—'}</span>
                     </div>
                     {!r.ok && r.reason && <div style={{ marginTop: '4px', color: 'var(--danger)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{r.reason.split('\n')[0]}</div>}
-                    {(r.hints ?? []).map((h, i) => <div key={i} style={{ marginTop: '3px', color: '#d29922' }}>Hint: {h}</div>)}
+                    {(r.hints ?? []).map((h, i) => <div key={i} style={{ marginTop: '3px', color: 'var(--c-yellow)' }}>Hint: {h}</div>)}
                   </div>
                 )
               })}
@@ -2468,11 +2471,11 @@ function RuleCard({ row, requests, isMandatory, stage, onToggle, onRename, onDel
         opacity: row.enabled ? 1 : 0.5,
       }}>
         <span style={{ color: 'var(--border)', fontSize: '14px', letterSpacing: '-3px', userSelect: 'none', cursor: 'grab' }}>⠿⠿</span>
-        <span style={{ fontSize: '10px', fontWeight: 800, padding: '2px 7px', borderRadius: '3px', background: 'rgba(227,98,9,0.15)', color: '#e36209', border: '1px solid rgba(227,98,9,0.3)', whiteSpace: 'nowrap', letterSpacing: '0.05em', flexShrink: 0 }}>
+        <span style={{ fontSize: '10px', fontWeight: 800, padding: '2px 7px', borderRadius: '3px', background: 'rgba(var(--c-amber-rgb),0.15)', color: 'var(--c-amber)', border: '1px solid rgba(var(--c-amber-rgb),0.3)', whiteSpace: 'nowrap', letterSpacing: '0.05em', flexShrink: 0 }}>
           CORRELATION
         </span>
         {srcPath && (
-          <span style={{ fontSize: '11px', padding: '2px 9px', borderRadius: '10px', background: 'rgba(227,98,9,0.08)', color: '#e36209', border: '1px solid rgba(227,98,9,0.25)', fontFamily: 'monospace', whiteSpace: 'nowrap', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', flexShrink: 0 }} title={srcReq?.url}>
+          <span style={{ fontSize: '11px', padding: '2px 9px', borderRadius: '10px', background: 'rgba(var(--c-amber-rgb),0.08)', color: 'var(--c-amber)', border: '1px solid rgba(var(--c-amber-rgb),0.25)', fontFamily: 'monospace', whiteSpace: 'nowrap', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', flexShrink: 0 }} title={srcReq?.url}>
             {srcReq?.method} {srcPath}
           </span>
         )}
@@ -2483,15 +2486,15 @@ function RuleCard({ row, requests, isMandatory, stage, onToggle, onRename, onDel
         </span>
         {stage !== null && (() => {
           const b = typeof stage === 'number'
-            ? { label: `STEP ${stage}`, title: `Auto-correlation step ${stage}: ${AUTO_STEPS[stage - 1].title}`, color: '#8b949e' }
+            ? { label: `STEP ${stage}`, title: `Auto-correlation step ${stage}: ${AUTO_STEPS[stage - 1].title}`, color: 'var(--text-muted)' }
             : STAGE_BADGE[stage]
           return (
-            <span title={b.title} style={{ fontSize: '10px', fontWeight: 700, padding: '2px 6px', borderRadius: '3px', background: `${b.color}22`, color: b.color, border: `1px solid ${b.color}55`, whiteSpace: 'nowrap', flexShrink: 0 }}>{b.label}</span>
+            <span title={b.title} style={{ fontSize: '10px', fontWeight: 700, padding: '2px 6px', borderRadius: '3px', background: tint(b.color, 13), color: b.color, border: `1px solid ${tint(b.color, 33)}`, whiteSpace: 'nowrap', flexShrink: 0 }}>{b.label}</span>
           )
         })()}
         {row.original.extractor && (
           <span title={EXTRACTOR_HELP[row.original.extractor] ?? row.original.extractor}
-            style={{ fontSize: '10px', fontWeight: 600, padding: '2px 6px', borderRadius: '3px', background: 'rgba(255,255,255,0.05)', color: 'var(--text-secondary)', border: '1px solid var(--border)', whiteSpace: 'nowrap', flexShrink: 0, fontFamily: 'monospace' }}>
+            style={{ fontSize: '10px', fontWeight: 600, padding: '2px 6px', borderRadius: '3px', background: 'rgba(var(--fg-rgb),0.05)', color: 'var(--text-secondary)', border: '1px solid var(--border)', whiteSpace: 'nowrap', flexShrink: 0, fontFamily: 'monospace' }}>
             {EXTRACTOR_LABEL[row.original.extractor] ?? row.original.extractor}
           </span>
         )}
@@ -2500,7 +2503,7 @@ function RuleCard({ row, requests, isMandatory, stage, onToggle, onRename, onDel
               ? 'Identical in both recordings, so probably static — switched off. Turn it on if it depends on the account or data you recorded with.'
               : 'A token with the same value in both recordings — kept on. If both runs shared a browser session, record the second one again after logging out.'}
             style={{ fontSize: '10px', fontWeight: 700, padding: '2px 6px', borderRadius: '3px', whiteSpace: 'nowrap', flexShrink: 0,
-              background: isStaticInBoth(row.original) ? 'rgba(255,255,255,0.05)' : 'rgba(var(--warning-rgb),0.12)',
+              background: isStaticInBoth(row.original) ? 'rgba(var(--fg-rgb),0.05)' : 'rgba(var(--warning-rgb),0.12)',
               color: isStaticInBoth(row.original) ? 'var(--text-muted)' : 'var(--warning)',
               border: `1px solid ${isStaticInBoth(row.original) ? 'var(--border)' : 'rgba(var(--warning-rgb),0.3)'}` }}>
             SAME IN BOTH
@@ -2529,8 +2532,8 @@ function RuleCard({ row, requests, isMandatory, stage, onToggle, onRename, onDel
         )}
         <UsedInBadge indices={row.original.used_in_requests} requests={requests} />
         <button onClick={() => !isLocked && onToggle(row.id)} title={isLocked ? 'Unlock to enable/disable' : row.enabled ? 'Disable' : 'Enable'}
-          style={{ width: '38px', height: '21px', borderRadius: '11px', border: 'none', cursor: isLocked ? 'not-allowed' : 'pointer', position: 'relative', background: row.enabled ? 'var(--accent)' : '#30363d', transition: 'background 0.15s', flexShrink: 0, padding: 0, opacity: isLocked ? 0.5 : 1 }}>
-          <span style={{ position: 'absolute', top: '2.5px', left: row.enabled ? '19px' : '2.5px', width: '16px', height: '16px', borderRadius: '50%', background: row.enabled ? '#fff' : '#8b949e', transition: 'left 0.15s' }} />
+          style={{ width: '38px', height: '21px', borderRadius: '11px', border: 'none', cursor: isLocked ? 'not-allowed' : 'pointer', position: 'relative', background: row.enabled ? 'var(--accent)' : 'var(--toggle-off)', transition: 'background 0.15s', flexShrink: 0, padding: 0, opacity: isLocked ? 0.5 : 1 }}>
+          <span style={{ position: 'absolute', top: '2.5px', left: row.enabled ? '19px' : '2.5px', width: '16px', height: '16px', borderRadius: '50%', background: row.enabled ? '#fff' : 'var(--text-muted)', transition: 'left 0.15s' }} />
         </button>
         {!isLocked && (
           <button onClick={() => onDelete(row.id)} style={{ background: 'transparent', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: '16px', lineHeight: 1, padding: '2px 4px', opacity: 0.45, flexShrink: 0 }}
@@ -2545,7 +2548,7 @@ function RuleCard({ row, requests, isMandatory, stage, onToggle, onRename, onDel
             This value was confirmed dynamic between HAR recordings. Unlocking lets you disable or delete it, but it may cause script failures.
           </span>
           <button onClick={() => { onToggleLock(row.id); setConfirmingUnlock(false) }}
-            style={{ fontSize: '12px', fontWeight: 600, padding: '4px 12px', borderRadius: '6px', border: 'none', cursor: 'pointer', background: 'rgba(var(--warning-rgb),0.2)', color: '#d29922' }}>
+            style={{ fontSize: '12px', fontWeight: 600, padding: '4px 12px', borderRadius: '6px', border: 'none', cursor: 'pointer', background: 'rgba(var(--warning-rgb),0.2)', color: 'var(--c-yellow)' }}>
             Unlock
           </button>
           <button onClick={() => setConfirmingUnlock(false)}
@@ -2586,10 +2589,10 @@ function stageOf(pass: string | undefined): Stage | null {
 }
 
 const STAGE_BADGE: Record<string, { label: string; title: string; color: string }> = {
-  ai: { label: 'AI', title: 'Found by AI auto-correlation', color: '#a78bfa' },
-  compare: { label: 'COMPARE', title: 'Found by comparing the two recordings', color: '#d29922' },
-  manual: { label: 'CUSTOM', title: 'Your custom rule', color: '#3ccf7a' },
-  replay: { label: 'REPLAY', title: 'Added by Replay & auto-fix', color: '#39c5cf' },
+  ai: { label: 'AI', title: 'Found by AI auto-correlation', color: 'var(--c-violet)' },
+  compare: { label: 'COMPARE', title: 'Found by comparing the two recordings', color: 'var(--c-yellow)' },
+  manual: { label: 'CUSTOM', title: 'Your custom rule', color: 'var(--c-green)' },
+  replay: { label: 'REPLAY', title: 'Added by Replay & auto-fix', color: 'var(--c-cyan)' },
 }
 
 function AutoCorrelationSteps({ values, ran, running }: { values: CorrelatedValue[]; ran: boolean; running: boolean }) {
@@ -2599,7 +2602,7 @@ function AutoCorrelationSteps({ values, ran, running }: { values: CorrelatedValu
       {AUTO_STEPS.map((st, i) => (
         <div key={st.title} style={{ padding: '12px 14px', borderRadius: '12px', background: 'var(--bg-surface)', border: `1px solid ${ran && counts[i] > 0 ? 'rgba(var(--accent-rgb),0.35)' : 'var(--border)'}` }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-            <span style={{ width: '22px', height: '22px', borderRadius: '50%', flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 700, background: ran ? 'rgba(var(--success-rgb),0.15)' : 'rgba(255,255,255,0.06)', color: ran ? 'var(--success)' : 'var(--text-muted)' }}>
+            <span style={{ width: '22px', height: '22px', borderRadius: '50%', flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 700, background: ran ? 'rgba(var(--success-rgb),0.15)' : 'rgba(var(--fg-rgb),0.06)', color: ran ? 'var(--success)' : 'var(--text-muted)' }}>
               {running ? <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> : ran ? <CheckCircle size={12} /> : i + 1}
             </span>
             <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{st.title}</span>
@@ -2833,8 +2836,8 @@ function StepCorrelate() {
       {/* ── AI auto-correlation: separate, opt-in ────────────────────── */}
       <Card style={{ marginBottom: '32px' }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px', flexWrap: 'wrap' }}>
-          <div style={{ width: '40px', height: '40px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(139,92,246,0.12)', border: '1px solid rgba(139,92,246,0.3)', flexShrink: 0 }}>
-            <Sparkles size={17} style={{ color: '#a78bfa' }} />
+          <div style={{ width: '40px', height: '40px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(var(--c-violet-rgb),0.12)', border: '1px solid rgba(var(--c-violet-rgb),0.3)', flexShrink: 0 }}>
+            <Sparkles size={17} style={{ color: 'var(--c-violet)' }} />
           </div>
           <div style={{ flex: 1, minWidth: '260px' }}>
             <h2 style={sectionHeadSt}>AI auto-correlation</h2>
@@ -2851,7 +2854,7 @@ function StepCorrelate() {
                 <option key={k} value={k}>{info.label} · {info.subtitle}</option>
               ))}
             </select>
-            <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', background: pInfo.tier === 'free' ? 'rgba(var(--success-rgb),0.15)' : 'rgba(var(--warning-rgb),0.15)', color: pInfo.tier === 'free' ? 'var(--success)' : '#d2991a', border: `1px solid ${pInfo.tier === 'free' ? 'rgba(var(--success-rgb),0.3)' : 'rgba(var(--warning-rgb),0.3)'}` }}>
+            <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', background: pInfo.tier === 'free' ? 'rgba(var(--success-rgb),0.15)' : 'rgba(var(--warning-rgb),0.15)', color: pInfo.tier === 'free' ? 'var(--success)' : 'var(--c-yellow)', border: `1px solid ${pInfo.tier === 'free' ? 'rgba(var(--success-rgb),0.3)' : 'rgba(var(--warning-rgb),0.3)'}` }}>
               {pInfo.tier.toUpperCase()}
             </span>
             <Btn variant="ghost" onClick={runAiCorrelation} disabled={anyBusy || !sessionId || !hasKey}>
@@ -2932,13 +2935,13 @@ function StepCorrelate() {
                           </td>
                           <td style={{ padding: '8px 12px', maxWidth: '160px' }}>
                             {row.secondValue
-                              ? <span style={{ fontFamily: 'monospace', fontSize: '11px', color: '#d29922', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={row.secondValue}>{row.secondValue}</span>
+                              ? <span style={{ fontFamily: 'monospace', fontSize: '11px', color: 'var(--c-yellow)', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={row.secondValue}>{row.secondValue}</span>
                               : <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontStyle: 'italic' }}>not found</span>}
                           </td>
                           <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' }}>
                             {row.isMandatory
                               ? <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px', background: 'rgba(var(--danger-rgb),0.12)', border: '1px solid rgba(var(--danger-rgb),0.35)', color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: '4px', width: 'fit-content' }}>🔒 Confirmed</span>
-                              : <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '10px', background: 'rgba(var(--warning-rgb),0.12)', border: '1px solid rgba(var(--warning-rgb),0.35)', color: '#d29922' }}>Dynamic</span>}
+                              : <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '10px', background: 'rgba(var(--warning-rgb),0.12)', border: '1px solid rgba(var(--warning-rgb),0.35)', color: 'var(--c-yellow)' }}>Dynamic</span>}
                           </td>
                           <td style={{ padding: '8px 12px' }}>
                             <UsedInBadge indices={row.original.used_in_requests} requests={requests} />
@@ -2990,18 +2993,18 @@ function StepCorrelate() {
                       const hasCor = rows.some(row => row.enabled && (row.original.source_request_index === r.index || row.original.used_in_requests.includes(r.index)))
                       return (
                         <tr key={r.index} onClick={() => selectRequest(r.index)}
-                          style={{ borderBottom: '1px solid var(--border)', cursor: 'pointer', borderLeft: `3px solid ${isSelected ? '#e36209' : 'transparent'}`, background: isSelected ? 'rgba(227,98,9,0.06)' : 'transparent', transition: 'background 0.1s' }}
-                          onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'rgba(255,255,255,0.025)' }}
+                          style={{ borderBottom: '1px solid var(--border)', cursor: 'pointer', borderLeft: `3px solid ${isSelected ? 'var(--c-amber)' : 'transparent'}`, background: isSelected ? 'rgba(var(--c-amber-rgb),0.06)' : 'transparent', transition: 'background 0.1s' }}
+                          onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'rgba(var(--fg-rgb),0.025)' }}
                           onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent' }}>
                           <td style={{ padding: '7px 10px' }}><MethodBadge method={r.method} /></td>
                           <td style={{ padding: '7px 6px' }}>
-                            <span style={{ fontSize: '11px', fontWeight: 700, color: r.status_code < 300 ? 'var(--success)' : r.status_code < 400 ? '#d29922' : 'var(--danger)' }}>{r.status_code}</span>
+                            <span style={{ fontSize: '11px', fontWeight: 700, color: r.status_code < 300 ? 'var(--success)' : r.status_code < 400 ? 'var(--c-yellow)' : 'var(--danger)' }}>{r.status_code}</span>
                           </td>
                           <td style={{ padding: '7px 10px', maxWidth: '120px' }}>
                             <span style={{ fontFamily: 'monospace', fontSize: '11px', color: 'var(--text-secondary)', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.url}>{path}</span>
                           </td>
                           <td style={{ padding: '7px 8px', textAlign: 'center', width: '20px' }}>
-                            {hasCor && <span title="Has correlation rules" style={{ fontSize: '11px', color: '#e36209' }}>✏</span>}
+                            {hasCor && <span title="Has correlation rules" style={{ fontSize: '11px', color: 'var(--c-amber)' }}>✏</span>}
                           </td>
                         </tr>
                       )
@@ -3033,7 +3036,7 @@ function StepCorrelate() {
                     {/* Request sub-tabs */}
                     <div style={{ display: 'flex', background: 'var(--bg-elevated)', borderBottom: '1px solid var(--border)', paddingLeft: '14px' }}>
                       {(['headers', 'payload', 'cookies'] as const).map(t => (
-                        <button key={t} onClick={() => setReqSubTab(t)} style={{ padding: '7px 14px', border: 'none', background: 'transparent', fontSize: '12px', fontWeight: reqSubTab === t ? 600 : 400, color: reqSubTab === t ? 'var(--text-primary)' : 'var(--text-muted)', borderBottom: reqSubTab === t ? '2px solid #e36209' : '2px solid transparent', marginBottom: '-1px', cursor: 'pointer', textTransform: 'capitalize' }}>
+                        <button key={t} onClick={() => setReqSubTab(t)} style={{ padding: '7px 14px', border: 'none', background: 'transparent', fontSize: '12px', fontWeight: reqSubTab === t ? 600 : 400, color: reqSubTab === t ? 'var(--text-primary)' : 'var(--text-muted)', borderBottom: reqSubTab === t ? '2px solid var(--c-amber)' : '2px solid transparent', marginBottom: '-1px', cursor: 'pointer', textTransform: 'capitalize' }}>
                           {t}
                         </button>
                       ))}
@@ -3096,7 +3099,7 @@ function StepCorrelate() {
                     {/* Response sub-tabs */}
                     <div style={{ display: 'flex', background: 'var(--bg-elevated)', borderBottom: '1px solid var(--border)', paddingLeft: '14px' }}>
                       {(['headers', 'content', 'cookies'] as const).map(t => (
-                        <button key={t} onClick={() => setResSubTab(t)} style={{ padding: '7px 14px', border: 'none', background: 'transparent', fontSize: '12px', fontWeight: resSubTab === t ? 600 : 400, color: resSubTab === t ? 'var(--text-primary)' : 'var(--text-muted)', borderBottom: resSubTab === t ? '2px solid #e36209' : '2px solid transparent', marginBottom: '-1px', cursor: 'pointer', textTransform: 'capitalize' }}>
+                        <button key={t} onClick={() => setResSubTab(t)} style={{ padding: '7px 14px', border: 'none', background: 'transparent', fontSize: '12px', fontWeight: resSubTab === t ? 600 : 400, color: resSubTab === t ? 'var(--text-primary)' : 'var(--text-muted)', borderBottom: resSubTab === t ? '2px solid var(--c-amber)' : '2px solid transparent', marginBottom: '-1px', cursor: 'pointer', textTransform: 'capitalize' }}>
                           {t}
                         </button>
                       ))}
@@ -3326,9 +3329,9 @@ function TestDataPanel() {
         <div>
           {/* Suggestions banner */}
           {visibleSuggestions.length > 0 && (
-            <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', background: 'rgba(139,92,246,0.05)' }}>
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', background: 'rgba(var(--c-violet-rgb),0.05)' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                <span style={{ fontSize: '12px', fontWeight: 600, color: '#a78bfa' }}>
+                <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--c-violet)' }}>
                   ✦ Suggested parameters from request bodies
                 </span>
                 <button onClick={() => setDismissed(new Set(suggestions.map(s => s.var_name)))}
@@ -3338,11 +3341,11 @@ function TestDataPanel() {
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                 {visibleSuggestions.map(s => (
-                  <div key={s.var_name} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(139,92,246,0.1)', border: '1px solid rgba(139,92,246,0.3)', borderRadius: '20px', padding: '4px 10px 4px 12px', fontSize: '12px' }}>
-                    <span style={{ fontFamily: 'monospace', color: '#a78bfa', fontWeight: 600 }}>{s.var_name}</span>
+                  <div key={s.var_name} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(var(--c-violet-rgb),0.1)', border: '1px solid rgba(var(--c-violet-rgb),0.3)', borderRadius: '20px', padding: '4px 10px 4px 12px', fontSize: '12px' }}>
+                    <span style={{ fontFamily: 'monospace', color: 'var(--c-violet)', fontWeight: 600 }}>{s.var_name}</span>
                     <span style={{ color: 'var(--text-muted)' }}>= "{s.value.slice(0, 28)}{s.value.length > 28 ? '…' : ''}"</span>
                     <button onClick={() => acceptSuggestion(s)} title="Add as variable"
-                      style={{ background: 'rgba(139,92,246,0.25)', border: 'none', borderRadius: '50%', width: '18px', height: '18px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#a78bfa', fontSize: '13px', lineHeight: 1, padding: 0, fontWeight: 700 }}>
+                      style={{ background: 'rgba(var(--c-violet-rgb),0.25)', border: 'none', borderRadius: '50%', width: '18px', height: '18px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--c-violet)', fontSize: '13px', lineHeight: 1, padding: 0, fontWeight: 700 }}>
                       +
                     </button>
                     <button onClick={() => dismissSuggestion(s.var_name)} title="Dismiss"
@@ -3356,7 +3359,7 @@ function TestDataPanel() {
           )}
 
           <div style={{ padding: '10px 16px 6px', fontSize: '12px', color: 'var(--text-muted)' }}>
-            Variables are added as <span style={{ fontFamily: 'monospace', color: 'var(--text-secondary)' }}>User Defined Variables</span> in the JMX and their values are substituted in request bodies (shown in <span style={{ color: '#a78bfa', fontWeight: 600 }}>purple</span> in the inspector).
+            Variables are added as <span style={{ fontFamily: 'monospace', color: 'var(--text-secondary)' }}>User Defined Variables</span> in the JMX and their values are substituted in request bodies (shown in <span style={{ color: 'var(--c-violet)', fontWeight: 600 }}>purple</span> in the inspector).
           </div>
 
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -3450,7 +3453,7 @@ function TestDataPanel() {
                       ) : varNamesEditing === undefined ? (
                         <>
                           {f.variables.map(v => (
-                            <span key={v} style={{ fontSize: '11px', fontFamily: 'monospace', background: 'rgba(var(--info-rgb),0.1)', border: '1px solid rgba(var(--info-rgb),0.25)', color: '#58a6ff', borderRadius: '4px', padding: '1px 7px' }}>
+                            <span key={v} style={{ fontSize: '11px', fontFamily: 'monospace', background: 'rgba(var(--info-rgb),0.1)', border: '1px solid rgba(var(--info-rgb),0.25)', color: 'var(--c-blue)', borderRadius: '4px', padding: '1px 7px' }}>
                               {'${' + v + '}'}
                             </span>
                           ))}
@@ -3492,10 +3495,10 @@ function TestDataPanel() {
                 Add data file +
               </button>
               {showFileMenu && (
-                <div style={{ position: 'absolute', top: '100%', left: '50%', transform: 'translateX(-50%)', marginTop: '4px', background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: '8px', boxShadow: '0 4px 16px rgba(0,0,0,0.3)', zIndex: 50, minWidth: '180px' }}>
+                <div style={{ position: 'absolute', top: '100%', left: '50%', transform: 'translateX(-50%)', marginTop: '4px', background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: '8px', boxShadow: '0 4px 16px rgba(var(--shadow-rgb),0.3)', zIndex: 50, minWidth: '180px' }}>
                   <button onClick={() => fileInputRef.current?.click()}
                     style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%', background: 'transparent', border: 'none', padding: '11px 16px', fontSize: '13px', color: 'var(--text-primary)', cursor: 'pointer', borderRadius: '8px' }}
-                    onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.06)')}
+                    onMouseEnter={e => (e.currentTarget.style.background = 'rgba(var(--fg-rgb),0.06)')}
                     onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
                     <FileText size={14} style={{ color: 'var(--text-muted)' }} />
                     Import new data file
@@ -3771,9 +3774,9 @@ function StepGenerate() {
   const [jmeter, setJmeter] = useState<JmeterInfo | null>(null)
 
   const LOAD_PROFILES: Record<string, { label: string; threads: string; rampup: string; loops: string; color: string }> = {
-    smoke:  { label: 'Smoke',  threads: '1',  rampup: '10',  loops: '1',  color: '#58a6ff' },
+    smoke:  { label: 'Smoke',  threads: '1',  rampup: '10',  loops: '1',  color: 'var(--c-blue)' },
     soak:   { label: 'Soak',   threads: '10', rampup: '60',  loops: '60', color: '#de5353' },
-    spike:  { label: 'Spike',  threads: '50', rampup: '5',   loops: '5',  color: '#d29922' },
+    spike:  { label: 'Spike',  threads: '50', rampup: '5',   loops: '5',  color: 'var(--c-yellow)' },
     stress: { label: 'Stress', threads: '25', rampup: '30',  loops: '20', color: 'var(--danger)' },
   }
 
@@ -3911,7 +3914,7 @@ function StepGenerate() {
                     return (
                       <button key={key} onClick={() => applyProfile(key)} style={{
                         padding: '5px 14px', borderRadius: '6px', fontSize: '12px', fontWeight: isActive ? 700 : 500, cursor: 'pointer', border: `1px solid ${isActive ? (p?.color ?? 'var(--accent)') : 'var(--border)'}`,
-                        background: isActive ? `${p?.color ?? 'var(--accent)'}22` : 'transparent',
+                        background: isActive ? tint(p?.color ?? 'var(--accent)', 13) : 'transparent',
                         color: isActive ? (p?.color ?? 'var(--accent)') : 'var(--text-muted)',
                       }}>
                         {key.charAt(0).toUpperCase() + key.slice(1)}
@@ -4566,11 +4569,11 @@ export default function AppPage() {
 
   return (
     <div style={{ display: 'flex', height: 'calc(100vh - 72px)', overflow: 'hidden' }}>
-      <aside style={{ width: '264px', flexShrink: 0, background: 'rgba(22,21,21,0.6)', backdropFilter: 'blur(16px)', borderRight: '1px solid var(--border)', padding: '32px 18px', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+      <aside style={{ width: '264px', flexShrink: 0, background: 'var(--sidebar-bg)', backdropFilter: 'blur(16px)', borderRight: '1px solid var(--border)', padding: '32px 18px', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
         <div style={{ marginBottom: '24px', paddingLeft: '10px' }}>
           <div style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.12em', color: 'var(--accent)', fontWeight: 600, marginBottom: '6px' }}>Workflow</div>
           <div style={{ fontSize: '20px', fontWeight: 600, color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>HAR to JMeter</div>
-          <div style={{ marginTop: '16px', height: '3px', borderRadius: '3px', background: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+          <div style={{ marginTop: '16px', height: '3px', borderRadius: '3px', background: 'rgba(var(--fg-rgb),0.08)', overflow: 'hidden' }}>
             <div style={{ height: '100%', width: `${(currentStep / (STEPS.length - 1)) * 100}%`, background: 'var(--accent-gradient)', borderRadius: '3px', transition: 'width 0.4s ease' }} />
           </div>
           <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--text-muted)' }}>Step {currentStep + 1} of {STEPS.length}</div>
@@ -4586,10 +4589,10 @@ export default function AppPage() {
             return (
               <button key={i} onClick={() => isReachable ? setStep(i) : undefined}
                 style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 12px', borderRadius: '14px', border: `1px solid ${isActive ? 'rgba(var(--accent-rgb),0.35)' : 'transparent'}`, background: idleBg, color: isActive ? 'var(--text-primary)' : isReachable ? 'var(--text-secondary)' : 'var(--text-muted)', cursor: isReachable ? 'pointer' : 'default', width: '100%', textAlign: 'left', transition: 'all 0.2s', fontSize: '14px', fontWeight: isActive ? 600 : 500, opacity: isReachable ? 1 : 0.55 }}
-                onMouseEnter={e => { if (isReachable && !isActive) (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.05)' }}
+                onMouseEnter={e => { if (isReachable && !isActive) (e.currentTarget as HTMLButtonElement).style.background = 'rgba(var(--fg-rgb),0.05)' }}
                 onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = idleBg }}
               >
-                <div style={{ width: '32px', height: '32px', flexShrink: 0, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: isActive ? 'var(--accent-gradient)' : isDone ? 'rgba(var(--success-rgb),0.12)' : 'rgba(255,255,255,0.05)', border: isActive ? 'none' : `1px solid ${isDone ? 'rgba(var(--success-rgb),0.3)' : 'var(--border)'}`, boxShadow: isActive ? '0 6px 16px -6px rgba(var(--accent-rgb),0.8)' : 'none' }}>
+                <div style={{ width: '32px', height: '32px', flexShrink: 0, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: isActive ? 'var(--accent-gradient)' : isDone ? 'rgba(var(--success-rgb),0.12)' : 'rgba(var(--fg-rgb),0.05)', border: isActive ? 'none' : `1px solid ${isDone ? 'rgba(var(--success-rgb),0.3)' : 'var(--border)'}`, boxShadow: isActive ? '0 6px 16px -6px rgba(var(--accent-rgb),0.8)' : 'none' }}>
                   {isDone ? <CheckCircle size={15} style={{ color: 'var(--success)' }} />
                     : <Icon size={14} style={{ color: isActive ? '#fff' : 'var(--text-muted)' }} />}
                 </div>
@@ -4604,9 +4607,9 @@ export default function AppPage() {
 
         <div style={{ marginTop: 'auto', paddingTop: '24px' }}>
           <button onClick={() => { useAppStore.getState().reset(); setStep(0) }}
-            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', width: '100%', padding: '10px 14px', borderRadius: '999px', border: '1px solid var(--border-strong)', background: 'rgba(255,255,255,0.04)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '13px', fontWeight: 500, transition: 'all 0.2s' }}
-            onMouseEnter={e => { const el = e.currentTarget as HTMLButtonElement; el.style.background = 'rgba(255,255,255,0.1)'; el.style.color = 'var(--text-primary)' }}
-            onMouseLeave={e => { const el = e.currentTarget as HTMLButtonElement; el.style.background = 'rgba(255,255,255,0.04)'; el.style.color = 'var(--text-secondary)' }}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', width: '100%', padding: '10px 14px', borderRadius: '999px', border: '1px solid var(--border-strong)', background: 'rgba(var(--fg-rgb),0.04)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '13px', fontWeight: 500, transition: 'all 0.2s' }}
+            onMouseEnter={e => { const el = e.currentTarget as HTMLButtonElement; el.style.background = 'rgba(var(--fg-rgb),0.1)'; el.style.color = 'var(--text-primary)' }}
+            onMouseLeave={e => { const el = e.currentTarget as HTMLButtonElement; el.style.background = 'rgba(var(--fg-rgb),0.04)'; el.style.color = 'var(--text-secondary)' }}
           >
             <RefreshCw size={13} /> Start Over
           </button>

@@ -852,7 +852,11 @@ export async function getDuplicates(sessionId: string): Promise<{ duplicates: { 
 /** Trigger a browser download for a URL that returns a file. */
 async function downloadUrl(url: string, fallbackName: string): Promise<void> {
   const res = await fetch(url)
-  if (!res.ok) throw new Error(`Download failed: ${res.statusText}`)
+  if (!res.ok) {
+    let detail = res.statusText
+    try { detail = (await res.json()).detail || detail } catch { /* not JSON */ }
+    throw new Error(`Download failed: ${detail}`)
+  }
   const blob = await res.blob()
   const href = URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -1207,11 +1211,18 @@ export async function saveTestContext(runId: string, ctx: TestContextFields): Pr
   })
 }
 
-export function resultReportUrl(runId: string, audience: 'tech' | 'exec', ai = false): string {
-  return `${API_BASE}/results/runs/${encodeURIComponent(runId)}/report?audience=${audience}${ai ? '&ai=true' : ''}`
+/** The app's light or dark mode, so report pages opened from it match (saved files follow the system). */
+function themeParam(): string {
+  const t = typeof document !== 'undefined' ? document.documentElement.dataset.theme : ''
+  return t === 'light' || t === 'dark' ? `theme=${t}` : ''
 }
 
-export async function downloadResultReport(runId: string, audience: 'tech' | 'exec', format: 'html' | 'md', ai = false): Promise<void> {
+export function resultReportUrl(runId: string, audience: 'tech' | 'exec', ai = false): string {
+  const theme = themeParam()
+  return `${API_BASE}/results/runs/${encodeURIComponent(runId)}/report?audience=${audience}${ai ? '&ai=true' : ''}${theme ? `&${theme}` : ''}`
+}
+
+export async function downloadResultReport(runId: string, audience: 'tech' | 'exec', format: 'html' | 'md' | 'docx' | 'doc', ai = false): Promise<void> {
   return downloadUrl(`${resultReportUrl(runId, audience, ai)}&format=${format}&download=true`, `${runId}_${audience}.${format}`)
 }
 
@@ -1268,12 +1279,44 @@ export async function listRunLabels(runId: string): Promise<{ labels: (LabelStat
   return fetchJson(`${API_BASE}/results/runs/${encodeURIComponent(runId)}/labels`)
 }
 
+/** One row of JMeter's HTML report Statistics table (whole run, JMeter's rules). */
+export interface JmeterStatRow {
+  label: string
+  kind?: string
+  samples: number
+  errors: number
+  error_pct: number
+  avg_ms: number
+  min_ms: number
+  max_ms: number
+  median_ms: number
+  p90_ms: number
+  p95_ms: number
+  p99_ms: number
+  tps: number
+  received_kbps: number
+  sent_kbps: number
+}
+
+export interface JmeterStatistics {
+  run_id: string
+  window: number
+  percentiles: number[]
+  total: JmeterStatRow
+  labels: JmeterStatRow[]
+}
+
+export async function getJmeterStatistics(runId: string): Promise<JmeterStatistics> {
+  return fetchJson(`${API_BASE}/results/runs/${encodeURIComponent(runId)}/jmeter-statistics`)
+}
+
 export function labelsReportUrl(runId: string): string {
-  return `${API_BASE}/results/runs/${encodeURIComponent(runId)}/labels-report`
+  const theme = themeParam()
+  return `${API_BASE}/results/runs/${encodeURIComponent(runId)}/labels-report${theme ? `?${theme}` : ''}`
 }
 
 export async function downloadLabelsReport(runId: string, format: 'html' | 'md'): Promise<void> {
-  return downloadUrl(`${labelsReportUrl(runId)}?format=${format}&download=true`, `${runId}_requests_transactions.${format}`)
+  return downloadUrl(`${API_BASE}/results/runs/${encodeURIComponent(runId)}/labels-report?format=${format}&download=true`, `${runId}_requests_transactions.${format}`)
 }
 
 // -- comparing two analysed runs ---------------------------------------------
@@ -1354,6 +1397,23 @@ export interface ServerMetrics {
   steady: RunAnalysis['steady']
   duration_s: number
   findings: (AnalysisFinding & { evidence: Record<string, unknown> })[]
+  relation: ServerRelation | null
+}
+
+/** How server metrics followed the load test (projectstack/results/server_load.py). */
+export type RelationStrength = 'strong' | 'moderate' | 'weak'
+export interface RelationRow {
+  key: string; name: string; unit: string; source: string; points: number; shot?: string
+  flat: boolean; low: number; high: number; steady_avg: number | null; peak: number; peak_offset_s: number
+  r_users: number | null; r_tps: number | null; r_p95: number | null; p95_scope: 'steady' | 'test'; r_errors: number | null
+  load: RelationStrength | null; with_p95: RelationStrength | null; with_errors: RelationStrength | null
+  trend: { direction: 'rising' | 'falling'; from: number; to: number } | null
+}
+export interface ServerRelation {
+  source: 'cloud' | 'screenshots'
+  rows: RelationRow[]
+  observations: string[]
+  thresholds: { strong: number; moderate: number }
 }
 
 export async function getCloudCatalog(): Promise<CloudCatalog> {
@@ -1389,4 +1449,130 @@ export async function fetchServerMetrics(runId: string, resources: CloudResource
   return fetchJson(`${API_BASE}/results/runs/${encodeURIComponent(runId)}/server-metrics`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ resources, save: true }),
   })
+}
+
+// ---------------------------------------------------------------------------
+// Server-metric screenshots and their AI reading
+// ---------------------------------------------------------------------------
+
+export interface Screenshot {
+  id: string
+  file: string
+  name: string
+  caption: string
+  media_type: string
+  bytes: number
+  width: number | null
+  height: number | null
+  added_at: string
+}
+
+export interface ScreenshotReading {
+  content: {
+    screenshots: {
+      id: string; title: string; readable: boolean; observations: string[]
+      time_axis: string; test_on_chart: string; covers_test: 'yes' | 'partly' | 'no' | 'unclear'
+      clock?: 'utc' | 'local' | 'unclear'
+      series?: { name: string; unit: string; values: (number | null)[] }[]
+      caveat?: string
+      error?: string                       // this screenshot could not be read (Read again retries it)
+    }[]
+    observations: string[]
+    caveats: string[]
+    read_at_s?: number[]
+    relation?: ServerRelation | null
+  }
+  provider: string | null
+  local: boolean
+  prompt: string | null
+  generated_at: string | null
+  stale: boolean
+  failed?: number
+  reused?: boolean
+}
+
+export interface ScreenshotJob {
+  id: string; run_id: string; status: 'running' | 'done' | 'failed'
+  done: number; total: number; message: string; error: string | null; result: ScreenshotReading | null
+}
+
+export interface VisionChoice { spec: string; label: string; local: boolean; where: string }
+
+export interface ScreenshotsState {
+  items: Screenshot[]
+  analysis: ScreenshotReading | null
+  providers: { choices: VisionChoice[]; default: string | null }
+  limits: { files: number; bytes: number; caption: number }
+  job: ScreenshotJob | null              // a reading running in the background
+  errors?: string[]
+}
+
+const shotsUrl = (runId: string) => `${API_BASE}/results/runs/${encodeURIComponent(runId)}/screenshots`
+
+export function screenshotImageUrl(runId: string, id: string): string {
+  return `${shotsUrl(runId)}/${encodeURIComponent(id)}/image`
+}
+
+export async function getScreenshots(runId: string): Promise<ScreenshotsState> {
+  return fetchJson(shotsUrl(runId))
+}
+
+export async function addScreenshots(runId: string, files: File[]): Promise<ScreenshotsState> {
+  const form = new FormData()
+  for (const f of files) form.append('files', f)
+  return fetchJson(shotsUrl(runId), { method: 'POST', body: form })
+}
+
+export async function captionScreenshot(runId: string, id: string, caption: string): Promise<ScreenshotsState> {
+  return fetchJson(`${shotsUrl(runId)}/${encodeURIComponent(id)}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ caption }),
+  })
+}
+
+export async function deleteScreenshot(runId: string, id: string): Promise<ScreenshotsState> {
+  return fetchJson(`${shotsUrl(runId)}/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+/** Start reading the screenshots in the background; poll getScreenshotJob for progress and the result. */
+export async function readScreenshots(runId: string, provider: string | null, fresh: boolean): Promise<ScreenshotJob> {
+  let timeZone = ''
+  try { timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || '' } catch { /* unknown */ }
+  return fetchJson(`${shotsUrl(runId)}/analysis`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ provider, fresh, time_zone: timeZone }),
+  })
+}
+
+export async function getScreenshotJob(runId: string, jobId: string): Promise<ScreenshotJob> {
+  return fetchJson(`${shotsUrl(runId)}/analysis/${encodeURIComponent(jobId)}`)
+}
+
+// -- Word reports in the company template ---------------------------------------
+
+export interface ReportTemplateInfo {
+  name: string; bytes: number; uploaded_at: string | null
+  placeholders: string[]; unknown: string[]; marker: boolean; auto_numbered: boolean
+  styles: { headings: boolean; list_bullet: boolean; table_grid: boolean; caption: boolean }
+}
+export interface ReportTemplateState {
+  template: ReportTemplateInfo | null
+  placeholders: Record<string, string>
+  marker: string
+  doc: { available: boolean; path: string | null; install: string }   // Word 97–2003 via LibreOffice
+}
+
+export const reportTemplateStarterUrl = `${API_BASE}/results/report-template/starter`
+
+export async function getReportTemplate(): Promise<ReportTemplateState> {
+  return fetchJson(`${API_BASE}/results/report-template`)
+}
+
+export async function uploadReportTemplate(file: File): Promise<ReportTemplateState> {
+  const form = new FormData()
+  form.append('file', file)
+  return fetchJson(`${API_BASE}/results/report-template`, { method: 'POST', body: form })
+}
+
+export async function deleteReportTemplate(): Promise<ReportTemplateState> {
+  return fetchJson(`${API_BASE}/results/report-template`, { method: 'DELETE' })
 }

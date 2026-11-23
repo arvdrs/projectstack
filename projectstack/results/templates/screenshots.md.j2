@@ -1,0 +1,48 @@
+{% if shots and (audience == "tech" or shots.analysed) %}
+## Server metrics from screenshots
+
+{% if shots.analysed %}
+{% for o in shots.observations %}
+- {{ o }}
+{% endfor %}
+
+{% if shots.caveats %}
+*Caveats: {{ shots.caveats|join(" ") }}*
+
+{% endif %}
+{% with rel = shots.relation %}{% include "server_relation.md.j2" %}{% endwith %}
+{% endif %}
+{% if audience == "tech" %}
+{% for s in shots.pictures %}
+**{{ s.heading|md }}**{% if s.caption and s.caption != s.heading %} ({{ s.caption|md }}){% endif %}
+
+![{{ s.heading|md }}]({{ s.link }})
+
+{% if s.time_axis or s.test_on_chart %}
+*{% if s.time_axis %}Chart shows {{ s.time_axis }}{% endif %}{% if s.time_axis and s.test_on_chart %} · {% endif %}{% if s.test_on_chart %}test {{ s.test_on_chart }}{% endif %}{% if s.covers_test == "no" %} — the test window is not on this chart{% elif s.covers_test == "partly" %} — the chart covers only part of the test window{% endif %}*
+
+{% endif %}
+{% for o in s.observations %}
+- {{ o }}
+{% endfor %}
+{% if s.observations %}
+
+{% endif %}
+{% if s.error %}
+*Not read by the AI: {{ s.error }}*
+
+{% elif s.caveat %}
+*{{ s.caveat }}*
+
+{% endif %}
+{% endfor %}
+{% endif %}
+{% if shots.analysed %}
+*Read by {{ shots.provider }}{% if shots.local %} on this machine{% endif %} from {{ shots.pictures|length }} screenshot(s) and the run's timeline. Figures about the servers are read from the images by the AI; check them against the screenshots.*
+{% elif shots.stale %}
+*{{ shots.pictures|length }} screenshot(s) attached. The AI reading is out of date and is left out.*
+{% else %}
+*{{ shots.pictures|length }} screenshot(s) attached; they have not been read by the AI.*
+{% endif %}
+
+{% endif %}

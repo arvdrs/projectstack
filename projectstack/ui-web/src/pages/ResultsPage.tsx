@@ -87,7 +87,7 @@ export default function ResultsPage() {
   const sameScenario = (runs ?? []).filter(r => r.scenario === scenario.trim())
 
   return (
-    <div style={{ maxWidth: '1100px', margin: '0 auto', padding: '40px 24px 64px' }}>
+    <div style={{ maxWidth: '1440px', margin: '0 auto', padding: '40px 24px 64px' }}>
       <motion.div {...fade}>
         <h1 style={{ fontSize: '34px', fontWeight: 600, lineHeight: 1.15, display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '10px' }}>
           <span style={{ width: '4px', height: '30px', borderRadius: '4px', background: 'var(--accent-gradient)', flexShrink: 0 }} />
@@ -104,7 +104,7 @@ export default function ResultsPage() {
             <Notice tone="warning">
               Results analysis stores runs in a local ClickHouse database, which is not running.{' '}
               Start it from the ProjectStack folder with{' '}
-              <code style={{ background: 'rgba(255,255,255,0.08)', padding: '1px 6px', borderRadius: 6 }}>{status.hint || 'docker compose -f deploy/clickhouse/docker-compose.yml up -d'}</code>
+              <code style={{ background: 'rgba(var(--fg-rgb),0.08)', padding: '1px 6px', borderRadius: 6 }}>{status.hint || 'docker compose -f deploy/clickhouse/docker-compose.yml up -d'}</code>
               , then <button onClick={refresh} style={{ background: 'none', border: 'none', color: 'inherit', textDecoration: 'underline', cursor: 'pointer', font: 'inherit', padding: 0 }}>check again</button>.
             </Notice>
           </div>
@@ -121,7 +121,7 @@ export default function ResultsPage() {
             style={{
               border: `1.5px dashed ${dragging ? 'var(--accent)' : 'var(--border-strong)'}`, borderRadius: '16px',
               padding: '28px', textAlign: 'center', cursor: 'pointer', marginBottom: '20px',
-              background: dragging ? 'rgba(var(--accent-rgb),0.06)' : 'rgba(255,255,255,0.02)',
+              background: dragging ? 'rgba(var(--accent-rgb),0.06)' : 'rgba(var(--fg-rgb),0.02)',
             }}>
             <FileUp size={26} style={{ color: file ? 'var(--accent)' : 'var(--text-muted)', margin: '0 auto 8px', display: 'block' }} />
             {file ? (
@@ -194,7 +194,7 @@ export default function ResultsPage() {
                 <Spinner size={13} /> Uploading {file?.name} — {mb(upload.sent)} of {mb(upload.total)}
                 ({upload.total ? Math.floor((upload.sent / upload.total) * 100) : 0}%)
               </div>
-              <div style={{ height: '6px', borderRadius: '6px', background: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+              <div style={{ height: '6px', borderRadius: '6px', background: 'rgba(var(--fg-rgb),0.08)', overflow: 'hidden' }}>
                 <div style={{ height: '100%', width: `${upload.total ? (upload.sent / upload.total) * 100 : 0}%`, background: 'var(--series-1)', transition: 'width 0.3s ease' }} />
               </div>
             </div>
@@ -254,7 +254,7 @@ export default function ResultsPage() {
                 <tbody>
                   {runs.map(r => (
                     <tr key={r.run_id} onClick={() => navigate(`/analyze/${r.run_id}`)} style={{ cursor: 'pointer' }}
-                      onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.03)')}
+                      onMouseEnter={e => (e.currentTarget.style.background = 'rgba(var(--fg-rgb),0.03)')}
                       onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
                       <td style={td} onClick={e => e.stopPropagation()}>
                         <input type="checkbox" aria-label={`Select ${r.scenario} ${r.tag} for comparison`} checked={selected.includes(r.run_id)}

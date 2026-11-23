@@ -102,7 +102,7 @@ export default function AnalyzeRunPrompt({ sessionId }: { sessionId: string }) {
         <div style={{ marginTop: '14px' }}>
           <Notice tone="warning">
             Results analysis needs the local ClickHouse database, which is not running. Start it with{' '}
-            <code style={{ background: 'rgba(255,255,255,0.08)', padding: '1px 6px', borderRadius: 6 }}>{status.hint || 'docker compose -f deploy/clickhouse/docker-compose.yml up -d'}</code>{' '}
+            <code style={{ background: 'rgba(var(--fg-rgb),0.08)', padding: '1px 6px', borderRadius: 6 }}>{status.hint || 'docker compose -f deploy/clickhouse/docker-compose.yml up -d'}</code>{' '}
             from the ProjectStack folder, then try again.
           </Notice>
         </div>
