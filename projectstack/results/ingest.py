@@ -61,11 +61,13 @@ class IngestResult:
 # Format detection
 # ---------------------------------------------------------------------------
 
-def _open_text(path: Path) -> io.TextIOBase:
+def open_jtl(path: Path) -> io.TextIOBase:
+    """A JTL as text, gunzipped on the fly when it is gzipped."""
     with open(path, "rb") as f:
         gz = f.read(2) == b"\x1f\x8b"
     raw = gzip.open(path, "rb") if gz else open(path, "rb")
     return io.TextIOWrapper(raw, encoding="utf-8", errors="replace", newline="")
+
 
 
 def _is_gzip(path: Path) -> bool:
@@ -77,7 +79,7 @@ def sniff(path: str | Path, props_path: str | Path | None = None) -> FileInfo:
     """Work out the format, columns and delimiter of a JTL file and check its timestamps."""
     path = Path(path)
     gz = _is_gzip(path)
-    with _open_text(path) as f:
+    with open_jtl(path) as f:
         head = f.read(1 << 20)
     if not head.strip():
         raise IngestError(f"{path.name} is empty")
@@ -242,73 +244,80 @@ _XML_ATTRS = {
     "tn": "threadName", "dt": "dataType", "s": "success", "by": "bytes", "sby": "sentBytes",
     "ng": "grpThreads", "na": "allThreads", "lt": "Latency", "it": "IdleTime", "ct": "Connect", "hn": "Hostname",
 }
-_XML_COLUMNS = ["timeStamp", "elapsed", "label", "responseCode", "responseMessage", "threadName", "dataType",
+XML_COLUMNS = ["timeStamp", "elapsed", "label", "responseCode", "responseMessage", "threadName", "dataType",
                 "success", "failureMessage", "bytes", "sentBytes", "grpThreads", "allThreads", "URL", "Latency",
                 "IdleTime", "Connect", "Hostname", "psKind"]
 _SKIP_TAGS = {"responseData", "samplerData", "requestHeader", "responseHeader", "cookies", "queryString",
               "method", "redirectLocation", "responseFile"}
 
 
+def xml_rows(path: Path, seen_attrs: set[str] | None = None) -> Iterator[list[str]]:
+    """
+    Every sample of an XML JTL (optionally gzipped) as a row in XML_COLUMNS order,
+    sub-results included, streamed with flat memory. `seen_attrs` collects the
+    XML attributes that occurred.
+    """
+    seen = seen_attrs if seen_attrs is not None else set()
+    stack: list[dict] = []
+    root = None
+    assertion: dict | None = None
+    with open_jtl(path) as f:
+        for event, elem in ET.iterparse(f, events=("start", "end")):
+            if root is None:
+                root = elem
+            is_sample = "ts" in elem.attrib and "lb" in elem.attrib
+            if event == "start":
+                if is_sample:
+                    parent = stack[-1] if stack else None
+                    rm = elem.get("rm", "")
+                    if rm.startswith(TC_MESSAGE):
+                        kind = "transaction"
+                    elif parent is None or parent["kind"] == "transaction":
+                        kind = "request"      # top level, or a child of a parent-sample Transaction Controller
+                    else:
+                        kind = "subresult"    # redirect / embedded resource of a request
+                    stack.append({"a": dict(elem.attrib), "kind": kind, "url": "", "failures": []})
+                elif elem.tag == "assertionResult":
+                    assertion = {"failure": False, "message": ""}
+                continue
+            tag = elem.tag
+            if tag == "java.net.URL" and stack:
+                stack[-1]["url"] = (elem.text or "").strip()
+            elif assertion is not None and tag in ("failure", "error"):
+                assertion["failure"] = assertion["failure"] or (elem.text or "").strip() == "true"
+            elif assertion is not None and tag == "failureMessage":
+                assertion["message"] = (elem.text or "").strip()
+            elif tag == "assertionResult" and assertion is not None:
+                if assertion["failure"] and stack:
+                    stack[-1]["failures"].append(assertion["message"])
+                assertion = None
+            if is_sample and stack:
+                s = stack.pop()
+                a = s["a"]
+                seen.update(a)
+                yield [
+                    a.get("ts", ""), a.get("t", "0"), a.get("lb", ""), a.get("rc", ""), a.get("rm", ""),
+                    a.get("tn", ""), a.get("dt", ""), a.get("s", "true"), s["failures"][0] if s["failures"] else "",
+                    a.get("by", "0"), a.get("sby", "0"), a.get("ng", "0"), a.get("na", "0"), s["url"],
+                    a.get("lt", "0"), a.get("it", "0"), a.get("ct", "0"), a.get("hn", ""), s["kind"],
+                ]
+                elem.clear()
+                if not stack and root is not None:
+                    root.clear()          # keep memory flat on multi-GB files
+            elif tag in _SKIP_TAGS:
+                elem.clear()
+
+
 def _xml_as_csv(info: FileInfo, warnings: list[str]) -> tuple[FileInfo, Iterator[bytes], bool]:
     """Stream an XML JTL as CSV rows (with a psKind column for the sample kind)."""
     seen_attrs: set[str] = set()
 
-    def rows() -> Iterator[list[str]]:
-        stack: list[dict] = []
-        root = None
-        assertion: dict | None = None
-        with _open_text(info.path) as f:
-            for event, elem in ET.iterparse(f, events=("start", "end")):
-                if root is None:
-                    root = elem
-                is_sample = "ts" in elem.attrib and "lb" in elem.attrib
-                if event == "start":
-                    if is_sample:
-                        parent = stack[-1] if stack else None
-                        rm = elem.get("rm", "")
-                        if rm.startswith(TC_MESSAGE):
-                            kind = "transaction"
-                        elif parent is None or parent["kind"] == "transaction":
-                            kind = "request"      # top level, or a child of a parent-sample Transaction Controller
-                        else:
-                            kind = "subresult"    # redirect / embedded resource of a request
-                        stack.append({"a": dict(elem.attrib), "kind": kind, "url": "", "failures": []})
-                    elif elem.tag == "assertionResult":
-                        assertion = {"failure": False, "message": ""}
-                    continue
-                tag = elem.tag
-                if tag == "java.net.URL" and stack:
-                    stack[-1]["url"] = (elem.text or "").strip()
-                elif assertion is not None and tag in ("failure", "error"):
-                    assertion["failure"] = assertion["failure"] or (elem.text or "").strip() == "true"
-                elif assertion is not None and tag == "failureMessage":
-                    assertion["message"] = (elem.text or "").strip()
-                elif tag == "assertionResult" and assertion is not None:
-                    if assertion["failure"] and stack:
-                        stack[-1]["failures"].append(assertion["message"])
-                    assertion = None
-                if is_sample and stack:
-                    s = stack.pop()
-                    a = s["a"]
-                    seen_attrs.update(a)
-                    yield [
-                        a.get("ts", ""), a.get("t", "0"), a.get("lb", ""), a.get("rc", ""), a.get("rm", ""),
-                        a.get("tn", ""), a.get("dt", ""), a.get("s", "true"), s["failures"][0] if s["failures"] else "",
-                        a.get("by", "0"), a.get("sby", "0"), a.get("ng", "0"), a.get("na", "0"), s["url"],
-                        a.get("lt", "0"), a.get("it", "0"), a.get("ct", "0"), a.get("hn", ""), s["kind"],
-                    ]
-                    elem.clear()
-                    if not stack and root is not None:
-                        root.clear()          # keep memory flat on multi-GB files
-                elif tag in _SKIP_TAGS:
-                    elem.clear()
-
     def chunks() -> Iterator[bytes]:
         buf = io.StringIO()
         w = csv.writer(buf, lineterminator="\n")
-        w.writerow(_XML_COLUMNS)
+        w.writerow(XML_COLUMNS)
         n = 0
-        for row in rows():
+        for row in xml_rows(info.path, seen_attrs):
             w.writerow(row)
             n += 1
             if buf.tell() > (2 << 20):
@@ -319,7 +328,7 @@ def _xml_as_csv(info: FileInfo, warnings: list[str]) -> tuple[FileInfo, Iterator
             raise IngestError(f"{info.path.name}: no samples found in the XML file")
         yield buf.getvalue().encode("utf-8")
 
-    xml_info = FileInfo(info.path, "xml", info.gzipped, list(_XML_COLUMNS), True, ",", "xml")
+    xml_info = FileInfo(info.path, "xml", info.gzipped, list(XML_COLUMNS), True, ",", "xml")
     xml_info._seen_attrs = seen_attrs  # type: ignore[attr-defined]  # filled while streaming
     return xml_info, chunks(), False
 

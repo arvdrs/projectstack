@@ -166,6 +166,18 @@ class ResultsDB:
     def insert(self, table: str, rows: list[list], columns: list[str]) -> None:
         self._call(lambda: self.client.insert(f"{self.db}.{table}", rows, column_names=columns))
 
+    def stream_to(self, sql: str, params: dict[str, Any] | None, out) -> int:
+        """Write a query's output in its FORMAT to the binary file `out`, streamed; returns the bytes written."""
+        stream = self._call(lambda: self.client.raw_stream(sql, parameters=params or {}))
+        written = 0
+        try:
+            while chunk := stream.read(1 << 20):
+                out.write(chunk)
+                written += len(chunk)
+        finally:
+            stream.close()
+        return written
+
     def _call(self, fn):
         from clickhouse_connect.driver.exceptions import ClickHouseError
         try:

@@ -85,6 +85,9 @@ export default function Navigation() {
         <NavLink to="/analyze" style={({ isActive }) => linkStyle(isActive)}>
           Analyse Results
         </NavLink>
+        <NavLink to="/reports" style={({ isActive }) => linkStyle(isActive)}>
+          Reports
+        </NavLink>
         <NavLink to="/settings" style={({ isActive }) => linkStyle(isActive)}>
           Settings
         </NavLink>

@@ -14,6 +14,7 @@ import json
 import re
 import secrets
 import shutil
+import tempfile
 import threading
 import time
 from dataclasses import asdict, dataclass, field
@@ -22,10 +23,11 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel
 
 from projectstack.config import IN_DOCKER, load_settings
+from projectstack.runner import dashboard_graphs as dg
 
 router = APIRouter(prefix="/api/results", tags=["results"])
 
@@ -108,12 +110,18 @@ def start_job(path: Path, *, source: str, scenario: str | None = None, tag: str 
         from projectstack.results.db import ResultsDBError, ResultsDBUnavailable
         from projectstack.results.ingest import IngestError
         job.status = "running"
+        # JMeter's HTML report for the graphs, from this file and alongside the analysis: the file is
+        # deleted afterwards, and only the file itself gives exactly the graphs of Reports → HTML Report
+        dashboard = _RunDashboard.start(path, scenario or path.name.split(".")[0])
+        result = None
         try:
             result = analyze_file(path, steady=steady or None, sla=sla, tag=tag, scenario=scenario or None,
                                   baseline=baseline or None, jmx=jmx, settings=_settings(), progress=job.log)
             job.run_id = result.run_id
             job.log(f"Done: {result.meta['run']['samples']:,} samples analysed")
             _auto_fetch_server_metrics(result, job)
+            if dashboard:
+                _graph_build_started(result.run_id, "Building JMeter's HTML report for the graphs …")
             job.status = "done"
         except ResultsDBUnavailable as exc:
             job.error, job.status = f"{exc} — start it with: {CLICKHOUSE_HINT}", "failed"
@@ -124,10 +132,17 @@ def start_job(path: Path, *, source: str, scenario: str | None = None, tag: str 
         except Exception as exc:  # noqa: BLE001 — shown to the user, the job must not die silently
             job.error, job.status = f"{type(exc).__name__}: {exc}", "failed"
         finally:
+            if dashboard:                              # the analysis is shown already; JMeter may still be reading
+                dashboard.thread.join()
             if cleanup:
                 path.unlink(missing_ok=True)
                 if path.parent != UPLOAD_DIR and path.parent.parent == UPLOAD_DIR:
                     shutil.rmtree(path.parent, ignore_errors=True)
+            if dashboard:
+                if job.status == "done" and result is not None:
+                    dashboard.keep(result.folder, result.run_id)
+                else:
+                    dashboard.discard()
 
     threading.Thread(target=work, name=f"analyze-{job.id}", daemon=True).start()
     return job
@@ -480,6 +495,201 @@ def jmeter_statistics(run_ref: str) -> dict[str, Any]:
         return {"run_id": run_id, **jmeter_stats.load(_db(), run_id, folder)}
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+# ---------------------------------------------------------------------------
+# Graphs: the five report graphs as JPEGs, captured from JMeter's HTML report for the run
+# ---------------------------------------------------------------------------
+
+_graph_builds: dict[str, dict[str, Any]] = {}     # run id -> {"status": "building" | "failed", "progress", "error"}
+_graph_lock = threading.Lock()
+
+
+def _graph_meta(folder: Path) -> dict[str, Any]:
+    try:
+        return json.loads((folder / "graphs" / "meta.json").read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_graph_meta(folder: Path, **fields: Any) -> None:
+    out = folder / "graphs"
+    out.mkdir(parents=True, exist_ok=True)
+    tmp = out / "meta.json.tmp"                  # replaced in one step: a status check never reads half a file
+    tmp.write_text(json.dumps({**_graph_meta(folder), **fields}, indent=2))
+    tmp.replace(out / "meta.json")
+
+
+def _graph_build_started(run_id: str, message: str) -> dict[str, Any]:
+    with _graph_lock:
+        state = _graph_builds[run_id] = {"status": "building", "progress": [message], "error": None}
+    return state
+
+
+def _graph_build_ended(folder: Path, run_id: str, source: str, error: str | None) -> None:
+    _save_graph_meta(folder, source=source, error=error,
+                     created_at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
+    with _graph_lock:
+        if error:
+            _graph_builds[run_id] = {**_graph_builds.get(run_id, {}), "status": "failed", "error": error}
+        else:
+            _graph_builds.pop(run_id, None)
+
+
+class _RunDashboard:
+    """JMeter's HTML report for a run, built from its uploaded file while the run is analysed."""
+
+    def __init__(self, jtl: Path, title: str):
+        from projectstack.runner.html_report import ReportError, ReportOptions, generate_html_report
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        self.dir = Path(tempfile.mkdtemp(prefix="dashboard-", dir=UPLOAD_DIR))
+        self.error: str | None = None
+
+        def build() -> None:
+            try:
+                generate_html_report(jtl, self.dir / "report", self.dir / "work", ReportOptions(title=title),
+                                     log=lambda m: None)
+            except ReportError as exc:
+                self.error = str(exc)
+            except Exception as exc:  # noqa: BLE001 — reported on the run's page
+                self.error = f"{type(exc).__name__}: {exc}"
+        self.thread = threading.Thread(target=build, name="run-dashboard", daemon=True)
+        self.thread.start()
+
+    @classmethod
+    def start(cls, jtl: Path, title: str) -> "_RunDashboard | None":
+        from projectstack.runner.jmeter_runner import find_jmeter
+        return cls(jtl, title) if find_jmeter() else None
+
+    def keep(self, folder: Path, run_id: str) -> None:
+        """Once JMeter is done: keep its report in the run's folder and capture the graphs from it."""
+        self.thread.join()
+        error = self.error
+        try:
+            if not error:
+                dest = folder / "jmeter-report"
+                shutil.rmtree(dest, ignore_errors=True)
+                shutil.move(str(self.dir / "report"), str(dest))
+                with _graph_lock:
+                    _graph_builds.get(run_id, {}).get("progress", []).append("Capturing the five graphs …")
+                dg.capture_graphs(dest, folder / "graphs")
+        except Exception as exc:  # noqa: BLE001 — the analysis is done; the page offers to try again
+            error = str(exc)
+        finally:
+            shutil.rmtree(self.dir, ignore_errors=True)
+        _graph_build_ended(folder, run_id, "original", error)     # ready only once nothing is left behind
+
+    def discard(self) -> None:
+        self.thread.join()
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+
+def _graph_state(run_id: str, folder: Path) -> dict[str, Any]:
+    base = f"/api/results/runs/{run_id}/graphs"
+    with _graph_lock:
+        build = json.loads(json.dumps(_graph_builds.get(run_id) or {}))
+    if build.get("status") == "building":
+        return {"status": "building", "progress": build.get("progress", [])[-4:]}
+    meta = _graph_meta(folder)
+    if dg.graph_files(folder / "graphs"):
+        return {"status": "ready", "source": meta.get("source"), "graphs_url": base, "zip_url": f"{base}.zip"}
+    error = build.get("error") or meta.get("error")
+    return {"status": "failed" if error else "none", "error": error,
+            "has_report": (folder / "jmeter-report" / "index.html").is_file()}
+
+
+@router.get("/runs/{run_ref}/graphs")
+def run_graphs(run_ref: str) -> dict[str, Any]:
+    """
+    Whether the run's five graphs are ready, being built, or still to be built. A run that has
+    JMeter's report but no current graphs (captured from other panels before, or removed) gets
+    them captured from it now, as the HTML Report tab does.
+    """
+    run_id, folder = _resolve(run_ref)
+    state = _graph_state(run_id, folder)
+    if state["status"] == "none" and state.get("has_report"):
+        return build_run_graphs(run_ref)
+    return state
+
+
+@router.post("/runs/{run_ref}/graphs")
+def build_run_graphs(run_ref: str) -> dict[str, Any]:
+    """
+    Build the graphs of a run that has none: from its JMeter report when it has one, otherwise
+    from JMeter's report of its stored samples (runs analysed before the graphs were added, or
+    without JMeter at the time).
+    """
+    from projectstack.results.export import export_jtl
+    from projectstack.runner.html_report import ReportOptions, generate_html_report
+    run_id, folder = _resolve(run_ref)
+    doc = _findings(folder)
+    db = _db()
+    report = folder / "jmeter-report"
+    has_report = (report / "index.html").is_file()
+    with _graph_lock:                     # checked and claimed in one step: a second click joins this build
+        busy = (_graph_builds.get(run_id) or {}).get("status") == "building" or bool(dg.graph_files(folder / "graphs"))
+        if not busy:
+            state = _graph_builds[run_id] = {"status": "building", "error": None, "progress": [
+                "Capturing the five graphs …" if has_report else "Exporting the run's samples from the results database …"]}
+    if busy:
+        return _graph_state(run_id, folder)
+    source = (_graph_meta(folder).get("source") or "original") if has_report else "stored-samples"
+
+    def log(message: str) -> None:
+        with _graph_lock:
+            state["progress"].append(message)
+
+    def work() -> None:
+        try:
+            if not has_report:
+                UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+                tmp = Path(tempfile.mkdtemp(prefix="dashboard-", dir=UPLOAD_DIR))
+                try:
+                    export_jtl(db, run_id, tmp / "run.jtl")
+                    log("Building JMeter's HTML report …")
+                    generate_html_report(tmp / "run.jtl", tmp / "report", tmp / "work",
+                                         ReportOptions(title=doc["run"].get("scenario") or run_id), log=lambda m: None)
+                    shutil.rmtree(report, ignore_errors=True)
+                    shutil.move(str(tmp / "report"), str(report))
+                finally:
+                    shutil.rmtree(tmp, ignore_errors=True)
+                log("Capturing the five graphs …")
+            dg.capture_graphs(report, folder / "graphs")
+            _graph_build_ended(folder, run_id, source, None)
+        except Exception as exc:  # noqa: BLE001 — shown on the run's page
+            _graph_build_ended(folder, run_id, source, str(exc))
+
+    threading.Thread(target=work, name=f"graphs-{run_id}", daemon=True).start()
+    return _graph_state(run_id, folder)
+
+
+def _graphs_ready(run_ref: str) -> tuple[str, Path, str]:
+    run_id, folder = _resolve(run_ref)
+    if not dg.graph_files(folder / "graphs"):
+        raise HTTPException(status_code=404, detail="This run's graphs have not been built yet")
+    prefix = _download_name(folder, run_id, "graphs", "zip").removesuffix("_graphs.zip")
+    return run_id, folder / "graphs", prefix
+
+
+@router.get("/runs/{run_ref}/graphs/{name}")
+def run_graph(run_ref: str, name: str, download: bool = False) -> FileResponse:
+    """One graph as a JPEG: running-vusers, hits-per-second, throughput, response-time or errors,
+    with .jpg (`download` makes the browser save it)."""
+    slug = dg.slug_from_name(name)
+    if not slug:
+        raise HTTPException(status_code=404, detail=f"Unknown graph {name!r}: use one of {', '.join(dg.SLUGS)} with .jpg")
+    _, out, prefix = _graphs_ready(run_ref)
+    return FileResponse(out / f"{slug}.jpg", media_type="image/jpeg", headers={
+        "Content-Disposition": f'{"attachment" if download else "inline"}; filename="{prefix}_{slug}.jpg"',
+        "Cache-Control": "no-cache"})
+
+
+@router.get("/runs/{run_ref}/graphs.zip")
+def run_graphs_zip(run_ref: str) -> Response:
+    """The five graphs as JPEGs in one ZIP."""
+    _, out, prefix = _graphs_ready(run_ref)
+    return Response(dg.zip_graphs(out, prefix), media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="{prefix}_graphs.zip"', "Cache-Control": "no-cache"})
 
 
 @router.get("/runs/{run_ref}/labels-report")

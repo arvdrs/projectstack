@@ -398,6 +398,11 @@ export default function LandingPage() {
               <button className="lp-btn lp-btn-primary" onClick={launch}>Generate your first script <ArrowRight size={16} /></button>
               <button className="lp-btn lp-btn-ghost" onClick={() => navigate('/analyze')}>Analyse test results</button>
             </motion.div>
+            <motion.div initial={reduce ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.95, duration: 0.6 }}>
+              <button className="lp-textlink" onClick={() => navigate('/reports')}>
+                Have a JTL already? Create JMeter's HTML or Aggregate report <ArrowRight size={14} />
+              </button>
+            </motion.div>
 
             <motion.div className="lp-trust" initial={reduce ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.1, duration: 0.6 }}>
               <span><Lock size={14} /> Runs locally</span>

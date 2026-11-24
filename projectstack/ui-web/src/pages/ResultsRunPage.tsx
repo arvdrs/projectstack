@@ -12,6 +12,7 @@ import {
   listRunLabels, resultReportUrl, type AnalysisFinding, type AskAnswer, type JmeterStatistics, type JmeterStatRow, type LabelStats,
   type RunAnalysis,
 } from '../api/client'
+import { RunGraphs } from '../components/results/GraphDownloads'
 import ObservationsPanel from '../components/results/ObservationsPanel'
 import ServerMetricsCard from '../components/results/ServerMetrics'
 import ServerScreenshotsCard from '../components/results/ServerScreenshots'
@@ -104,6 +105,11 @@ export default function ResultsRunPage() {
           <CardTitle>Timeline</CardTitle>
           <Timeline points={a.timeline.points} bucketS={a.timeline.bucket_s} durationS={a.run.duration_s}
             steady={a.steady} findings={a.findings} errorTarget={errorTarget} />
+        </Card>
+
+        <Card style={{ marginBottom: '20px' }}>
+          <CardTitle>Graphs</CardTitle>
+          <RunGraphs runId={a.run.run_id} />
         </Card>
 
         <ServerMetricsCard analysis={a} onAttached={() => getResultRun(runId).then(setA).catch(() => {})} />

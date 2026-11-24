@@ -1185,6 +1185,25 @@ export async function getAnalysisJob(jobId: string): Promise<AnalysisJob> {
   return fetchJson(`${API_BASE}/results/jobs/${jobId}`)
 }
 
+/** An analysed run's five graphs (JPEGs from JMeter's HTML report for the run). */
+export interface RunGraphsState {
+  status: 'ready' | 'building' | 'none' | 'failed'
+  source?: 'original' | 'stored-samples' | null    // built from the uploaded file, or from the stored samples
+  graphs_url?: string                              // <graphs_url>/running-vusers.jpg, …/errors.jpg
+  zip_url?: string
+  progress?: string[]
+  error?: string | null
+  has_report?: boolean
+}
+
+export async function getRunGraphs(runId: string): Promise<RunGraphsState> {
+  return fetchJson(`${API_BASE}/results/runs/${encodeURIComponent(runId)}/graphs`)
+}
+
+export async function buildRunGraphs(runId: string): Promise<RunGraphsState> {
+  return fetchJson(`${API_BASE}/results/runs/${encodeURIComponent(runId)}/graphs`, { method: 'POST' })
+}
+
 export async function listResultRuns(limit = 100): Promise<{ runs: ResultsRunRow[] }> {
   return fetchJson(`${API_BASE}/results/runs?limit=${limit}`)
 }
@@ -1575,4 +1594,187 @@ export async function uploadReportTemplate(file: File): Promise<ReportTemplateSt
 
 export async function deleteReportTemplate(): Promise<ReportTemplateState> {
   return fetchJson(`${API_BASE}/results/report-template`, { method: 'DELETE' })
+}
+
+// ---------------------------------------------------------------------------
+// JMeter HTML reports (JMeter's own dashboard for an uploaded JTL)
+// ---------------------------------------------------------------------------
+
+export type HtmlReportStatus = 'queued' | 'running' | 'done' | 'failed'
+
+export interface HtmlReportSummary {
+  samples: number
+  errors: number
+  error_pct: number | null
+  mean_ms: number | null
+  median_ms: number | null
+  p90_ms: number | null
+  p95_ms: number | null
+  p99_ms: number | null
+  max_ms: number | null
+  throughput: number | null
+  labels: number
+  start_time: string | null
+  end_time: string | null
+}
+
+export interface HtmlReport {
+  id: string
+  title: string
+  source_file: string
+  source_size: number
+  created_at: string
+  status: HtmlReportStatus
+  progress: string[]
+  error: string | null
+  options: {
+    apdex_satisfied_ms: number | null
+    apdex_tolerated_ms: number | null
+    granularity_ms: number | null
+    label_filter: string
+  }
+  summary: HtmlReportSummary | null
+  seconds: number | null
+  view_url: string | null
+  download_url: string | null
+  graphs_url: string | null       // <graphs_url>/running-vusers.jpg, …/errors.jpg
+  graphs_zip_url: string | null   // all five JPEGs
+  graphs_error: string | null     // why the graphs could not be captured
+}
+
+export interface HtmlReportOptions {
+  title?: string
+  apdexSatisfied?: string
+  apdexTolerated?: string
+  granularity?: string        // milliseconds, or '' for automatic
+  labelFilter?: string
+}
+
+export function createHtmlReport(file: File, opts: HtmlReportOptions = {},
+  onProgress?: (sent: number, total: number) => void): Promise<HtmlReport> {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('title', opts.title ?? '')
+  form.append('apdex_satisfied', opts.apdexSatisfied ?? '')
+  form.append('apdex_tolerated', opts.apdexTolerated ?? '')
+  form.append('granularity', opts.granularity ?? '')
+  form.append('label_filter', opts.labelFilter ?? '')
+  // XMLHttpRequest rather than fetch: result files can be several GB, and only XHR reports upload progress
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', `${API_BASE}/html-reports`)
+    xhr.upload.onprogress = e => { if (e.lengthComputable && onProgress) onProgress(e.loaded, e.total) }
+    xhr.onload = () => {
+      let body: { detail?: string } & Partial<HtmlReport> = {}
+      try { body = JSON.parse(xhr.responseText) } catch { /* not JSON */ }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(body as HtmlReport)
+      else reject(new Error(body.detail || `Upload failed (${xhr.status} ${xhr.statusText})`))
+    }
+    xhr.onerror = () => reject(new Error('Upload failed: the server could not be reached'))
+    xhr.onabort = () => reject(new Error('Upload cancelled'))
+    xhr.send(form)
+  })
+}
+
+export async function listHtmlReports(): Promise<{ reports: HtmlReport[] }> {
+  return fetchJson(`${API_BASE}/html-reports`)
+}
+
+export async function getHtmlReport(id: string): Promise<HtmlReport> {
+  return fetchJson(`${API_BASE}/html-reports/${encodeURIComponent(id)}`)
+}
+
+export async function deleteHtmlReport(id: string): Promise<{ deleted: string }> {
+  return fetchJson(`${API_BASE}/html-reports/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+// ---------------------------------------------------------------------------
+// JMeter Aggregate Reports (two tables for an uploaded JTL: APIs and transactions)
+// ---------------------------------------------------------------------------
+
+export interface AggregateRow {
+  label: string
+  samples: number
+  average: number
+  median: number
+  p90: number
+  p95: number
+  p99: number
+  min: number
+  max: number
+  error_rate: number            // a fraction: 0.0123 is 1.23%
+  throughput: number | null     // per second; null for JMeter's Infinity (a single 0 ms sample)
+  received_kbps: number
+  sent_kbps: number
+  shown?: { error: string; throughput: string; received: string; sent: string }   // as JMeter's table shows them
+}
+
+export interface AggregateTable {
+  rows: AggregateRow[]
+  total: AggregateRow | null
+}
+
+export interface AggregateReport {
+  id: string
+  title: string
+  source_file: string
+  source_size: number
+  created_at: string
+  status: HtmlReportStatus
+  progress: string[]
+  error: string | null
+  options: { include_subresults: boolean; include_empty_transactions: boolean }
+  summary: { format: string; samples_read: number; samples: number; labels: number; start_ms: number; end_ms: number } | null
+  notes: {
+    subresults: { included: boolean; labels: string[]; samples: number }
+    empty_transactions: { included: boolean; samples: number; labels: string[] }
+    negative_elapsed: number
+    unreadable_rows: number
+  } | null
+  counts: { apis: number; transactions: number } | null
+  seconds: number | null
+  downloads: { apis_csv: string | null; transactions_csv: string | null; xlsx: string | null } | null
+  tables?: { apis: AggregateTable; transactions: AggregateTable }
+  columns?: string[]
+}
+
+export interface AggregateReportOptions {
+  title?: string
+  includeSubresults?: boolean
+  includeEmptyTransactions?: boolean
+}
+
+export function createAggregateReport(file: File, opts: AggregateReportOptions = {},
+  onProgress?: (sent: number, total: number) => void): Promise<AggregateReport> {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('title', opts.title ?? '')
+  form.append('include_subresults', opts.includeSubresults ? 'true' : '')
+  form.append('include_empty_transactions', opts.includeEmptyTransactions ? 'true' : '')
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', `${API_BASE}/aggregate-reports`)
+    xhr.upload.onprogress = e => { if (e.lengthComputable && onProgress) onProgress(e.loaded, e.total) }
+    xhr.onload = () => {
+      let body: { detail?: string } & Partial<AggregateReport> = {}
+      try { body = JSON.parse(xhr.responseText) } catch { /* not JSON */ }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(body as AggregateReport)
+      else reject(new Error(body.detail || `Upload failed (${xhr.status} ${xhr.statusText})`))
+    }
+    xhr.onerror = () => reject(new Error('Upload failed: the server could not be reached'))
+    xhr.onabort = () => reject(new Error('Upload cancelled'))
+    xhr.send(form)
+  })
+}
+
+export async function listAggregateReports(): Promise<{ reports: AggregateReport[] }> {
+  return fetchJson(`${API_BASE}/aggregate-reports`)
+}
+
+export async function getAggregateReport(id: string, tables = false): Promise<AggregateReport> {
+  return fetchJson(`${API_BASE}/aggregate-reports/${encodeURIComponent(id)}${tables ? '?tables=true' : ''}`)
+}
+
+export async function deleteAggregateReport(id: string): Promise<{ deleted: string }> {
+  return fetchJson(`${API_BASE}/aggregate-reports/${encodeURIComponent(id)}`, { method: 'DELETE' })
 }

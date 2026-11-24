@@ -98,6 +98,13 @@
 }
 .lp-lede { font-size: clamp(16px, 1.5vw, 19px); line-height: 1.65; color: var(--text-secondary); max-width: 540px; }
 .lp-cta-row { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 40px; }
+.lp-textlink {
+  display: inline-flex; align-items: center; gap: 6px; margin-top: 18px; padding: 0; background: none; border: none;
+  font: inherit; font-size: 14px; color: var(--text-secondary); cursor: pointer; transition: color 0.2s ease;
+}
+.lp-textlink:hover { color: var(--text-primary); }
+.lp-textlink svg { transition: transform 0.2s ease; }
+.lp-textlink:hover svg { transform: translateX(3px); }
 .lp-trust { display: flex; gap: 22px; flex-wrap: wrap; margin-top: 36px; font-size: 13px; color: var(--text-muted); }
 .lp-trust span { display: inline-flex; align-items: center; gap: 7px; }
 
