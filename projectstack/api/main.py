@@ -49,6 +49,8 @@ from projectstack.runner.jmeter_runner import (
 from projectstack.runner.live_stats import LiveRun
 from projectstack.runner.metrics_parser import parse_jtl
 from projectstack.api.results_api import router as results_router
+from projectstack.api.html_reports_api import router as html_reports_router
+from projectstack.api.aggregate_reports_api import router as aggregate_reports_router
 from projectstack.analyzer.har_analyzer import analyze_har, scan_sensitive_data, detect_duplicates
 from projectstack.analyzer.report_analyzer import (
     parse_html_report, from_session_results, derive_insights, build_llm_context,
@@ -64,6 +66,8 @@ from projectstack.exporter.cicd_exporter import export_github_actions, export_je
 
 app = FastAPI(title="ProjectStack API", version="1.0.0")
 app.include_router(results_router)      # results analysis: /api/results/…
+app.include_router(html_reports_router) # JMeter HTML reports from a JTL: /api/html-reports/…
+app.include_router(aggregate_reports_router)  # JMeter Aggregate Reports from a JTL: /api/aggregate-reports/…
 
 app.add_middleware(
     CORSMiddleware,

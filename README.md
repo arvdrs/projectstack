@@ -1,7 +1,9 @@
 # ProjectStack
 
 Turns browser recordings (HAR files, or the built-in proxy recorder) into JMeter
-test plans with automatic correlation, runs them, and analyses the results.
+test plans with automatic correlation, runs them, and analyses the results. It also turns
+any JMeter result file into JMeter's own reports: the HTML dashboard and the Aggregate Report
+for the APIs and the transactions ([Reports from a JTL](#reports-from-a-jtl)).
 
 - Docker, with everything included: `docker compose up -d --build`, then open http://localhost:6292.
   See [Run with Docker](#run-with-docker).
@@ -194,6 +196,157 @@ ClickHouse. On Debian and Ubuntu, `python3 -m venv` needs the `python3-venv` pac
 (`sudo apt install python3-venv`). When an OS upgrade changes the Python version (Ubuntu 24.04 moves
 from 3.10 to 3.12), delete `.venv` and create it again.
 
+## Reports from a JTL
+
+**Reports** in the top navigation (or *Have a JTL already?* on the home page) makes JMeter's own
+reports for a result file you already have. It is separate from HAR → JMX and from results
+analysis, and it does not need ClickHouse. It has two tabs, and a file chosen on one tab stays
+chosen on the other:
+
+- **HTML Report** (`/reports/html`): [JMeter's HTML dashboard](#jmeter-html-report), and its
+  [graphs as JPEGs](#graphs-to-download).
+- **Aggregate Report** (`/reports/aggregate`): [JMeter's Aggregate Report](#aggregate-report) in
+  two tables, one for the APIs and one for the transactions, as CSV or Excel.
+
+Both read the same files: CSV with or without a header row, with any delimiter, or XML results,
+optionally gzipped. That is the same set results analysis accepts.
+
+### JMeter HTML report
+
+The **HTML Report** tab turns a JMeter result file into JMeter's standard HTML dashboard: Apdex,
+statistics per label, errors, and the graphs over time. It is the report
+`jmeter -g results.jtl -o report/` makes, built by your own JMeter, so every number is JMeter's.
+
+1. Drop a JTL on the tab.
+2. Optionally set:
+   - a title for the dashboard;
+   - the graph granularity (JMeter's own 1 minute by default; *Automatic* picks one from the test's
+     length, about 200 points per graph);
+   - the Apdex thresholds (with only T set, F is 4 × T);
+   - under *Advanced*, a regular expression for the labels to include.
+3. Click **Generate report**. The page shows the headline numbers, **Open report** (in a new tab)
+   and **Download ZIP**.
+
+Earlier reports are listed under the form. Each one can be opened, downloaded or deleted.
+
+The result, and **Graphs** on each listed report, also offer [the report graphs](#graphs-to-download)
+as JPEGs, one at a time or all five in a ZIP.
+
+- **Files it accepts:** more than JMeter's report generator reads on its own. That generator only
+  accepts CSV with a header row. ProjectStack first converts XML results, gzipped files, and CSV
+  without a header row or with another delimiter into that form. The dashboard numbers do not change: an XML file and the same samples as CSV give
+  identical statistics.
+- **Where reports are kept:** `~/.projectstack/html-reports/<id>/`, with JMeter's log of the
+  generation. In Docker that is `/data/.projectstack/html-reports`, in the `projectstack_data`
+  volume. The uploaded file is deleted once its report has been generated.
+- **Large files:** one report is generated at a time, and the next one waits for it. JMeter reads
+  the whole file, so a JTL of several GB takes a few minutes.
+
+### Graphs to download
+
+The five graphs of a performance report, as JPEGs for a document. They are JMeter's own charts,
+captured from its HTML report, so they are exactly what the report shows: each panel's title bar,
+the graph and its legend, cut just right of the graph (without the *Zoom* overview and the
+panel's buttons), at twice screen resolution.
+
+| Graph | JMeter HTML report chart |
+| --- | --- |
+| Running Vusers Graph | Active Threads Over Time |
+| Hits Per Second Graph | Hits Per Second |
+| Throughput Graph | Bytes Throughput Over Time |
+| Response Time Graph | Response Times Over Time |
+| Error Graph | Codes Per Second (one line per response code, errors included) |
+
+Each one downloads on its own (**Download JPEG**), or all five at once (**Download all (ZIP)**).
+
+- **The same JTL gives the same pictures on both pages.** An analysed run's graphs come from
+  JMeter's HTML report for the run, built from the uploaded file while it is analysed, with the
+  HTML Report tab's defaults. The JPEGs are byte-for-byte the ones the HTML Report tab gives for
+  the same file. That report is kept in the run's folder (`jmeter-report/`).
+- **Runs analysed before this:** their original file is gone, so **Create the graphs** builds
+  JMeter's report from the run's stored samples. The counts and rates are identical. Average
+  response times can differ in the 15th digit, because JMeter keeps running averages that depend on
+  the samples' order. With many labels, the line colours of the Response Time graph can also
+  differ from a report of the original file: JMeter orders those lines partly by where each label
+  first appears in the file, and that order is not stored.
+- **Graphs captured before the Error Graph became Codes Per Second** (it was Total Transactions
+  Per Second at first) are captured again from the same JMeter report the next time they are
+  shown, on the HTML Report tab and on analysed runs alike. Nothing needs to be generated again.
+- **Needs Google Chrome or Chromium** to capture the charts (in the Docker image already;
+  `PSTACK_CHROME` points at another binary). Without it, the reports and analyses still work, and
+  the page says why the graphs are missing.
+
+### Aggregate report
+
+The **Aggregate Report** tab gives JMeter's Aggregate Report for a result file in two tables:
+
+- **APIs:** every sampler (HTTP requests and any other sampler), one row per label.
+- **Transactions:** the Transaction Controllers, one row per controller. A file without
+  Transaction Controllers has no transactions table.
+
+Each table has JMeter's columns (Label, # Samples, Average, Median, 90%, 95% and 99% Line, Min,
+Max, Error %, Throughput, Received KB/sec, Sent KB/sec), with a TOTAL row for that table's
+samples. Rows are in the order their label first appears in the file, as in JMeter. Click a
+column heading to sort, and type in the filter box to narrow the labels; TOTAL stays last and
+always covers every label.
+
+1. Drop a JTL on the tab, and optionally give a title (used in the downloaded file names).
+2. Choose what to include (both are off by default):
+   - **List sub-results as APIs.** JMeter writes each redirect and embedded resource of a request
+     as a row of its own (`Login-0`, `Login-1` after `Login`), and their time is already part of
+     the request.
+   - **Count empty transactions.** These are Transaction Controller samples where none of the
+     controller's samplers ran (message `Number of samples in transaction : 0`, recorded as 0 ms).
+     JMeter's Aggregate Report counts them; its HTML report leaves them out. Counting them pulls
+     the controller's average and percentiles down.
+3. Click **Create aggregate report**. The tables appear on the page. The page also says what was
+   left out, with an example label.
+
+Downloads:
+
+- **Download CSV**, on each table: the table exactly as JMeter's Aggregate Report saves it with
+  *Save Table Data* and *Save Table Header*. That is the same header, the same number formats
+  (Error % as `0.210%`, Throughput per second as `12.34567` or `.03118`, KB/sec with two
+  decimals), and the same quoting.
+- **Download both (Excel):** one workbook with an *APIs* sheet and a *Transactions* sheet. The
+  numbers stay numbers, Error % is a percentage, and the header and TOTAL rows are bold.
+
+On the page, Error % and Throughput look as they do in JMeter's table (`0.17%`, `31.6/sec`,
+`52.1/hour`).
+
+**How the numbers are computed.** As JMeter 5.6's Aggregate Report listener computes them. The
+tests check this byte for byte against JMeter's own classes (`tests/jmeter_aggregate.groovy`):
+
+- Average is the mean, cut to a whole millisecond (not rounded).
+- Median and the 90/95/99% Lines are the smallest elapsed time that at least round(n × p) of the
+  row's n samples do not exceed. They cover all samples, with no interpolation and no window. p is
+  JMeter's single-precision 0.9, 0.95 and 0.99, which changes the result for a few sample counts.
+  These are not the HTML dashboard's percentiles, which interpolate over each label's last 20,000
+  samples.
+- Throughput is samples per second from the first sample's start to the last sample's end.
+  Received and Sent KB/sec divide the bytes by the same time, with 1 KB = 1024 bytes.
+
+**How the samples are split:**
+
+- Transactions are the labels with Transaction Controller samples (message
+  `Number of samples in transaction …`).
+- Every other label is an API, except sub-results. In a CSV file, a label is a sub-result when it
+  is `<label>-<n>`, `<label>` is a request in the file, and at least 90% of its samples start
+  inside a sample of `<label>` on the same thread. That is the rule results analysis uses, and
+  the order the rows were written in does not matter. XML files nest sub-results, so there is
+  nothing to guess.
+- Samples with a negative elapsed time (JMeter writes one when a test stops in the middle of a
+  Transaction Controller) are left out, and so is a line cut off at the end of the file. The
+  page says how many there were.
+
+**Where reports are kept:** `~/.projectstack/aggregate-reports/<id>/` (`meta.json` and the
+tables). In Docker that is `/data/.projectstack/aggregate-reports`. The uploaded file is deleted
+once the tables are built. Earlier reports are listed under the form, with **View**, **Excel** and
+delete.
+
+**Speed:** about 250,000 samples a second, so a JTL of 2 GB (around 14 million samples) takes about
+a minute. It does not need JMeter.
+
 ## Results analysis
 
 `pstack analyze` loads a JMeter result file (JTL) into ClickHouse, finds the
@@ -210,6 +363,8 @@ the raw samples; nothing is estimated by a model.
   get the verdict, plain-language observations, the timeline, findings with evidence, per-transaction
   tables, the comparison with the baseline, the technical and executive reports, and a box to ask
   questions about the run. Earlier analyses are listed on the same page.
+- **Graphs** (a card under a run's timeline): [the report graphs](#graphs-to-download) as JPEGs,
+  one at a time or all five in a ZIP.
 - **After a test run** (step 4, Run Test): when JMeter finishes, ProjectStack offers to analyse the
   run. It uses the run's results, the SLA you set in step 3 and the generated script (so correlation
   problems point at the extractor responsible), compares the run with the last passing run of the

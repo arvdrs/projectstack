@@ -62,6 +62,13 @@ def _wait(client, job_id, timeout=60):
     raise AssertionError("analysis job did not finish")
 
 
+def _graphs_built(client, run_id, timeout=120):
+    deadline = time.monotonic() + timeout
+    while client.get(f"/api/results/runs/{run_id}/graphs").json().get("status") == "building":
+        assert time.monotonic() < deadline, "the run's graphs were not built"
+        time.sleep(0.2)
+
+
 def test_upload_analyse_and_read(client, tmp_path):
     assert client.get("/api/results/status").json()["available"] is True
     path = scenario_csv(tmp_path / "web.jtl", ramp_steady(users=20, ramp_s=120, steady_s=600, down_s=60), with_tc=True,
@@ -73,6 +80,7 @@ def test_upload_analyse_and_read(client, tmp_path):
     job = _wait(client, res.json()["id"])
     assert job["status"] == "done", job
     assert any("web.jtl" in p for p in job["progress"])                     # the user's file name, not a temp name
+    _graphs_built(client, job["run_id"])     # JMeter's report for the graphs reads the upload until it is built
     assert not list((tmp_path / "uploads").iterdir())                       # upload removed once loaded
 
     run = client.get(f"/api/results/runs/{job['run_id']}").json()

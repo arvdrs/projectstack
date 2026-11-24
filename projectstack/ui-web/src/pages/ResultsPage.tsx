@@ -3,7 +3,7 @@
  * an earlier analysis. A standalone feature next to the HAR → JMX workflow.
  */
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { Activity, ChevronDown, ChevronRight, FileUp, GitCompare, Microscope, RefreshCw } from 'lucide-react'
 import {
@@ -93,10 +93,14 @@ export default function ResultsPage() {
           <span style={{ width: '4px', height: '30px', borderRadius: '4px', background: 'var(--accent-gradient)', flexShrink: 0 }} />
           Analyse Test Results
         </h1>
-        <p style={{ color: 'var(--text-secondary)', fontSize: '15px', lineHeight: 1.6, maxWidth: '760px', marginBottom: '28px' }}>
+        <p style={{ color: 'var(--text-secondary)', fontSize: '15px', lineHeight: 1.6, maxWidth: '760px', marginBottom: '8px' }}>
           Upload a JMeter result file (JTL) from any test. ProjectStack finds the steady state, computes exact
           percentiles per transaction, detects slowdowns, error bursts, saturation, load-generator and correlation
           problems, gives a verdict against your SLA and writes the reports. Raw results stay on this machine.
+        </p>
+        <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '28px' }}>
+          Need JMeter's HTML dashboard or Aggregate Report for a JTL?{' '}
+          <Link to="/reports" style={{ color: 'var(--accent)', textDecoration: 'none', fontWeight: 500 }}>Create a report →</Link>
         </p>
 
         {status && !status.available && (

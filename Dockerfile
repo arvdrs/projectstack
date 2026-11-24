@@ -59,9 +59,12 @@ ENV LANG=C.UTF-8 \
     PSTACK_IN_DOCKER=1
 ENV PATH="/opt/jmeter/bin:${JAVA_HOME}/bin:${PATH}"
 
-# LibreOffice Writer (no GUI) converts Word reports to Word 97–2003 (.doc); DejaVu draws their charts
+# LibreOffice Writer (no GUI) converts Word reports to Word 97–2003 (.doc); DejaVu draws their charts.
+# Chromium captures the report graphs (JPEG) from JMeter's HTML reports; Liberation gives it the
+# Arial and Times metrics the JMeter dashboard is laid out with.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends tzdata libreoffice-writer-nogui fonts-dejavu-core \
+      chromium fonts-liberation \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
