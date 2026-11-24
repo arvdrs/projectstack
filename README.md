@@ -1,9 +1,25 @@
 # ProjectStack
 
-Turns browser recordings (HAR files, or the built-in proxy recorder) into JMeter
-test plans with automatic correlation, runs them, and analyses the results. It also turns
-any JMeter result file into JMeter's own reports: the HTML dashboard and the Aggregate Report
-for the APIs and the transactions ([Reports from a JTL](#reports-from-a-jtl)).
+Turns browser recordings into correlated JMeter scripts, runs them, and reports on the results.
+It runs on your own computer. Data leaves it only when you use an AI feature, read cloud
+server metrics or send a report by Gmail.
+
+The web app has three parts, in its top navigation:
+
+- **HAR → JMX**: record a user journey or upload HAR files, correlate the dynamic values, and
+  generate a JMeter script that replays under load. Then run it and see its report. See
+  [HAR → JMX](#har--jmx).
+- **Analyse Results**: upload a JTL from any test and get a verdict against your SLA, findings,
+  per-transaction tables, run comparisons, server metrics, and Word and HTML reports. See
+  [Results analysis](#results-analysis).
+- **Reports**: JMeter's own reports for a JTL you already have. These are the HTML dashboard,
+  with its graphs as JPEGs, and the Aggregate Report for the APIs and the transactions, as CSV
+  or Excel. See [Reports from a JTL](#reports-from-a-jtl).
+
+**Settings** holds the AI provider, correlation rule packs, the JMeter path, default test
+parameters, the Word report template, cloud monitoring keys, Grafana and Gmail.
+
+To start it:
 
 - Docker, with everything included: `docker compose up -d --build`, then open http://localhost:6292.
   See [Run with Docker](#run-with-docker).
@@ -52,6 +68,8 @@ services as `healthy`, open **http://localhost:6292**.
 | JMeter | 5.6 on Java 11, with the same plugins and libraries as the reference install (listed in `deploy/docker/jmeter-libs.txt`), the same 8 GB heap limit (`-Xmx8g`) and a 30-minute HTML report timeout |
 | JMeter plugins | Custom Thread Groups (Stepping, Ultimate, Concurrency, Arrivals), Dummy Sampler, Plugins Manager, WebSocket Samplers (Peter Doornbosch), WebSocket Sampler (Maciej Zaleski), Apache POI 5.2.3 for Excel files |
 | ClickHouse | 25.8, for results analysis, already connected |
+| Chromium | Captures the report graphs (JPEG) from JMeter's HTML reports. Liberation fonts give it the Arial and Times metrics the dashboard is laid out with |
+| LibreOffice Writer | Converts Word reports to Word 97–2003 (.doc) |
 | `pstack` CLI | Inside the app container |
 
 ### Everyday commands
@@ -84,8 +102,9 @@ The web app doesn't need this folder: you upload and download files in the brows
 
 ### Where your data is kept
 
-- **Settings** (including API keys), sessions, JMeter reports, uploaded files and the
-  recorder's certificate are in the Docker volume `projectstack_data`.
+- **Settings** (including API keys), sessions, the reports made under **Reports** (HTML and
+  Aggregate), JMeter reports of test runs, uploaded files and the recorder's certificate are in
+  the Docker volume `projectstack_data`.
 - **Analysed runs** are in the volume `projectstack_clickhouse-data`.
 
 Both survive stopping, restarting, rebuilding and updating. `docker compose down` removes the
@@ -177,7 +196,9 @@ PSTACK_CLICKHOUSE_URL=clickhouse://user:password@clickhouse.example.internal:812
 ## Run it directly
 
 Without Docker you need Python 3.10 or later, Node 18, Java 11 with JMeter 5.6 on the `PATH`, and,
-for results analysis, the local ClickHouse (see [Setup](#setup)).
+for results analysis, the local ClickHouse (see [Setup](#setup)). Two more are optional: Google
+Chrome or Chromium to capture the report graphs, and LibreOffice Writer to save Word reports as
+.doc.
 
 ```bash
 # Once: a virtual environment with the exact package versions
@@ -195,6 +216,93 @@ first; with the system Python the API is missing packages and Analyse Results ca
 ClickHouse. On Debian and Ubuntu, `python3 -m venv` needs the `python3-venv` package
 (`sudo apt install python3-venv`). When an OS upgrade changes the Python version (Ubuntu 24.04 moves
 from 3.10 to 3.12), delete `.venv` and create it again.
+
+## HAR → JMX
+
+**HAR → JMX** turns a user journey into a JMeter script in five steps: **Upload**, **Correlate
+Values**, **Generate Script**, **Run Test** and **View Report**.
+
+### 1. Upload
+
+There are three ways to start:
+
+- **Upload HAR files.** Save the recording in Chrome DevTools: **Network**, then *Save all as HAR
+  with content*. Add a **second recording** of the same journey to flag the values that differ
+  between the two as dynamic. Those are correlated with certainty.
+- **Record in browser.** ProjectStack's recorder (port 8082) opens a separate Chrome window whose
+  traffic goes through it. Type a transaction name before each step of the journey: the requests
+  that follow are grouped under it, as with Transaction Controllers in JMeter's recorder. Static
+  files and the browser's background traffic are left out, and **Save recording (.har)** keeps a
+  copy. To record from Docker, see
+  [Differences from running it directly](#differences-from-running-it-directly).
+- **Quick Convert.** This turns a HAR straight into a JMX, with every request exactly as recorded
+  and no correlation, parameters, transactions or SLA. It does not start the five steps.
+
+Then choose the base URLs to keep; each domain gets its own `BASE_URL` variable. You can untick
+requests to leave them out and change their order. **Analyse HAR** shows the protocol, methods,
+authentication flow, response times, errors, duplicates and rate limits. **Scan for Sensitive
+Data** looks for personal data and tokens in URLs and bodies before you share the script.
+
+### 2. Correlate Values
+
+- **Auto-correlation** finds the dynamic values and shows a confidence for each. It looks at tokens
+  and JWTs, values from responses, headers, redirects and cookies, and text, forms and framework
+  rules, and it searches backwards from where each value is used. Your own rule packs
+  (**Settings → Correlation Rule Packs**) add patterns.
+- **AI auto-correlation** uses the provider chosen in Settings (Groq, Gemini, Ollama, Claude or
+  OpenAI) to find what the rules missed.
+- Review, rename or switch off each correlation. Click a request to see its correlated variables
+  highlighted. **Define Correlation Rule** adds your own extractor (JSON Path, a regular expression,
+  or the text before and after the value, from the body or a header). **Test Rule** checks it
+  against the recording.
+- **Replay & auto-fix** runs the script once with JMeter (1 user, 1 iteration) and compares every
+  response with the recording. It repairs extractors and adds missed correlations, and repeats
+  until the script replays cleanly. This sends real requests to the recorded application.
+- **Test Data:** `P_` variables become JMeter User Defined Variables. CSV and TXT files become CSV
+  Data Set Configs, either unique per thread or shared across threads.
+
+### 3. Generate Script
+
+- Test name and thread group: Thread Group, Stepping, Concurrency or Ultimate Thread Group, with
+  the users, ramp-up and duration, or stages.
+- Options:
+  - group the requests into Transaction Controllers;
+  - add think times from the HAR's timestamps (Constant Timers);
+  - add a View Results Tree listener for checking the script in JMeter;
+  - send metrics to Grafana through InfluxDB (Backend Listener).
+- **SLA (optional):** a response-time target, a maximum error rate and a minimum throughput, with
+  per-transaction response times when needed. The run is judged against it.
+- **Export Script:** the JMX, a k6 script, a GitHub Actions or Jenkins pipeline, or a ZIP for the
+  team (the JMX, its correlations as JSON, the k6 script, a GitHub Actions workflow and a short
+  README).
+
+### 4. Run Test
+
+ProjectStack runs the script with your local JMeter. The users, ramp-up, loops and duration come
+from the script, and you can change them here. A live monitor shows requests, errors and response
+times while the test runs, and **Open Grafana UI** appears when metrics go to Grafana. When JMeter
+finishes, ProjectStack offers to analyse the run (see [In the web app](#in-the-web-app)).
+
+### 5. View Report
+
+- The run's **Test Execution Summary** and **Per-Transaction / Endpoint Detail**, judged against
+  the SLA when one was set.
+- **Open JMeter Report** (JMeter's HTML dashboard), **Download Summary Report** and **Download
+  JMX**.
+- **Report Analyzer:** high-level insights from the JMeter report, with an optional AI narrative.
+  **Share report via Gmail** sends them; set up the account in **Settings → Email (Gmail)**.
+
+### From the CLI
+
+```bash
+pstack parse journey.har                         # what the recording contains
+pstack correlate journey.har                     # the dynamic values found, with their confidence
+pstack generate journey.har -t 50 -r 60 -o checkout.jmx
+pstack validate checkout.jmx
+pstack run checkout.jmx -t 50 -r 60 -l 10
+```
+
+`pstack <command> --help` lists each command's options.
 
 ## Reports from a JTL
 
